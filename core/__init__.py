@@ -1,4 +1,4 @@
-"""Core module for orchestration and strategy."""
+"""Core module for orchestration, budget, and strategy helpers."""
 
 from .orchestrator import Orchestrator
 from .strategy_manager import StrategyManager

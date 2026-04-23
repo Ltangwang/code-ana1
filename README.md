@@ -15,7 +15,7 @@ Typical eval entry: `scripts/evaluate_code_search.py` (non-Java and per-language
 3. **Ollama:** Produce structured output on the pool (e.g. `best_candidate_index`, `needs_escalation`) as the **edge** reranker and gate.
 4. **Cloud:** If GT is outside bi-encoder Top-K, trigger **query rewrite** / wider search, or cloud API **rerank/parse**; subject to config and budget.
 
-Orchestration reuses **Ollama session**, **multi-cloud factory**, and **budget/strategy** in `core/orchestrator.py`; retrieval and bi-encoder logic live under **`scripts/`** and **`shared/`**.
+Orchestration reuses **Ollama session**, **multi-cloud factory**, and **budget** in `core/orchestrator.py`; retrieval and bi-encoder logic live under **`scripts/`** and **`shared/`**.
 
 ## Requirements
 
@@ -42,9 +42,9 @@ On Linux / macOS: `source .venv/bin/activate`.
 - **`config/thresholds.yaml`:** Thresholds, may ship with the repo.
 - **`.env`:** Cloud `API_KEY`, etc. (do not commit).
 
-Eval scripts read `ollama`, `cloud`, `budget`, `strategy`, etc. from `settings.yaml`; bi-encoder paths, cache dirs, and retrieval Top-K follow script args and config—see each script’s `--help`.
+Eval scripts read `ollama`, `cloud`, `budget`, and related keys from `settings.yaml`; bi-encoder paths, cache dirs, and retrieval Top-K follow script args and config—see each script’s `--help`.
 
-## Running code search eval (examples)
+## Running code search eval
 
 Language, data paths, Top-K, and whether to skip cloud depend on your local `settings` and datasets, for example:
 
@@ -68,7 +68,7 @@ code-ana1/
 │   ├── csn_retriever.py / csn_data.py
 │   ├── csn_ce_rerank.py             # Cross-encoder rerank
 │   └── train_unixcoder_csn*.py      # Bi-encoder / retrieval training
-├── core/                            # Orchestration, budget, strategy (shared with eval)
+├── core/                            # Orchestration and budget (shared with eval)
 ├── cloud/                           # Cloud provider clients
 ├── edge/                            # Local inference (Ollama), etc.
 ├── shared/                          # CSN paths, language profiles, schemas, etc.
@@ -82,7 +82,6 @@ code-ana1/
 | Area | Scripts (summary) |
 |------|---------------------|
 | Clone detection | `evaluate_clone_detection.py` |
-| Defect detection | `evaluate_defect_detection.py` |
 | BCB train / RAG | `train_unixcoder_bcb.py`, `bcb_rag.py` |
 
 ## Tests

@@ -1,15 +1,14 @@
-# Threshold Configuration for Analysis
+# Optional reference thresholds (not auto-loaded; tune via config/settings.yaml as needed).
+# Former AST / hotspot sections were removed with the defect-analysis prototype.
 
-# Confidence Score Thresholds
 confidence:
-  high: 0.7      # >= 0.7 is high confidence
-  medium: 0.4    # 0.4-0.7 is medium confidence
-  low: 0.0       # < 0.4 is low confidence
+  high: 0.7
+  medium: 0.4
+  low: 0.0
 
-# Severity Thresholds
 severity:
   critical:
-    min_confidence: 0.8  # Need high confidence for critical
+    min_confidence: 0.8
     priority: 1
   high:
     min_confidence: 0.6
@@ -24,76 +23,29 @@ severity:
     min_confidence: 0.2
     priority: 5
 
-# AST Complexity Thresholds
-complexity:
-  cyclomatic:
-    low: 5
-    medium: 10
-    high: 20
-    critical: 30
-  
-  nesting:
-    low: 2
-    medium: 4
-    high: 6
-    critical: 8
-  
-  function_length:
-    low: 20
-    medium: 50
-    high: 100
-    critical: 200
-  
-  parameter_count:
-    low: 3
-    medium: 5
-    high: 8
-    critical: 10
-
-# Hotspot Detection Weights
-hotspot_weights:
-  cyclomatic_complexity: 0.3
-  nesting_depth: 0.2
-  function_length: 0.15
-  exception_handling_missing: 0.15
-  null_checks_missing: 0.1
-  resource_management: 0.1
-
-# Budget Thresholds
 budget:
-  critical: 0.1   # < 10% remaining = critical
-  low: 0.2        # < 20% remaining = low
-  warning: 0.4    # < 40% remaining = warning
+  critical: 0.1
+  low: 0.2
+  warning: 0.4
 
-# Cloud Upload Decision Thresholds
 upload:
-  # Confidence-based
   max_confidence_for_upload: 0.6
-  
-  # Severity-based (always upload if critical regardless of confidence)
   always_upload_severity:
     - "critical"
-  
-  # Budget-based adjustments
   budget_multipliers:
-    critical: 2.0    # Lower threshold when critical budget
+    critical: 2.0
     low: 1.5
     warning: 1.2
     normal: 1.0
 
-# Performance Thresholds
 performance:
   max_local_inference_time_ms: 5000
   max_cloud_api_time_ms: 30000
-  max_ast_parse_time_ms: 2000
-  
-  # Alert if exceeded
   alert_thresholds:
     local_inference_ms: 10000
     cloud_api_ms: 60000
     total_analysis_ms: 300000
 
-# Quality Thresholds
 quality:
   min_code_fragment_lines: 3
   max_code_fragment_lines: 100
@@ -101,10 +53,8 @@ quality:
   min_fixes_to_generate: 1
   max_fixes_to_generate: 5
 
-# Rate Limiting
 rate_limits:
   local_per_minute: 100
   cloud_per_minute: 20
   cloud_per_hour: 500
   cloud_per_day: 5000
-

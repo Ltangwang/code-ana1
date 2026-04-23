@@ -1,13 +1,6 @@
-"""Edge module for local code analysis."""
+"""Edge module: local Ollama inference and optional Java DFG helpers."""
 
-from .ast_analyzer import ASTAnalyzer, Hotspot
+from .java_dfg_skeleton import extract_java_dfg_skeleton
 from .local_inference import OllamaInference
-from .confidence_scorer import ConfidenceScorer
 
-__all__ = [
-    "ASTAnalyzer",
-    "Hotspot",
-    "OllamaInference",
-    "ConfidenceScorer",
-]
-
+__all__ = ["OllamaInference", "extract_java_dfg_skeleton"]
