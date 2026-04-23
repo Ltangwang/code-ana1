@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Git
+.git/
+.gitignore
+
+# Logs
+logs/
+*.log
+
+# Database
+*.db
+*.sqlite
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Config with secrets
+.env
+config/secrets.yaml
+
+# Documentation
+docs/
+*.md
+
+# Examples (can be large)
+examples/large_projects/
+

@@ -1,0 +1,37 @@
+%% Edge-Cloud 代码检索评测流水线（evaluate_code_search.py）
+%% 可用 VS Code Mermaid 插件、https://mermaid.live 或 mermaid-cli 导出 PNG/SVG
+
+flowchart TB
+  subgraph init ["初始化"]
+    A["加载配置 settings.yaml"] --> B["加载 UniXcoder\n本地 checkpoint 或 microsoft/unixcoder-base"]
+    B --> C["从 codebase.jsonl 建双塔索引\n向量缓存 npz"]
+    C --> D["加载 test.jsonl 查询"]
+    D --> E{"可选: Cross-Encoder\nOllama health_check"}
+  end
+
+  subgraph perq ["每条查询"]
+    Q["query + GT url"] --> R["双塔: 全库相似度排序\ntop retrieve_k"]
+    R --> H{"GT 在 retrieve_k 内?"}
+    H -->|否| RF["云端：改写检索用语\n(JSON refined_search_query)"]
+    RF --> R50["双塔：用改写句从全库\n召回 top cloud_rescue_k 候选"]
+    R50 --> CR["云端：在候选池上\n选定 best_index"]
+    CR --> MET
+    H -->|是| CE["CE 重排\n或 --no-ce 跳过"]
+    CE --> P["取前 llm_pool_k → pool"]
+    P --> O["Ollama 重排 JSON\nbest_candidate_index + needs_escalation"]
+    O --> OK{"Ollama OK\n且不需 escalation?"}
+    OK -->|是| DONE["ollama_ok"]
+    OK -->|否| BUD{"预算可支付?"}
+    BUD -->|否| BF["budget_after_ollama_fail"]
+    BUD -->|是| CL["云端 API 重排"]
+    CL --> PAR{"解析有效 index?"}
+    PAR -->|否| IP["cloud_invalid_parse"]
+    PAR -->|是| CS["cloud_success_after_fallback"]
+  end
+
+  MET["汇总指标"]
+  init --> perq
+  DONE --> MET
+  BF --> MET
+  IP --> MET
+  CS --> MET

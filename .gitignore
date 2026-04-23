@@ -1,0 +1,96 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+**/.ipynb_checkpoints/
+
+# Logs
+logs/
+*.log
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment & secrets (do not push)
+.env
+.env.*
+!.env.example
+config/secrets.yaml
+*.pem
+*.p12
+id_rsa
+id_rsa.pub
+*.key
+
+# Optional local overrides (API keys / machine paths)
+config/settings.local.yaml
+config/settings.yaml
+
+# Local evaluation outputs (large / machine-specific)
+evaluation_runs/
+
+# Accidental copy of Windows path into repo (embeddings / large binaries)
+G:/
+
+# Local training run dump (typo folder name)
+fune-t/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Type check / linters (if added later)
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Large datasets & downloaded corpora (use scripts / LFS separately if needed)
+CodeSearchNet_Dataset/
+CodeSearchNet_clean_Dataset/
+
+# Local experiment outputs & scratch files
+results_*.json
+results_*.csv
+results/
+clone_detection_summary.json
+temp_*.java
+
+# ML / experiment tooling (optional)
+wandb/
+runs/
