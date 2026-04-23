@@ -1,157 +1,95 @@
-# Edge-Cloud 协作代码分析原型
+# code-ana1：双塔检索 + Ollama + 云端的代码检索流水线
 
-在边缘端使用本地小模型（如 Ollama）做快速草稿分析，按需将低置信度或关键片段提交云端大模型校验，并结合预算控制降低 API 成本。适用于缺陷检测、多语言 AST 热点抽取等研究与教学场景。
+本仓库围绕 **CodeSearchNet 风格代码检索** 搭建：**双塔（Bi-encoder）** 在全库上做向量召回，**Ollama** 在候选池上做本地重排与决策，在触发条件或预算允许时由**云端大模型**完成查询改写、扩展检索与最终重排等兜底步骤，从而在延迟、成本与效果之间折中。
 
-## 核心能力
+**仓库**：<https://github.com/ltangwang/code-ana1>
 
-- **边缘优先**：本地 Ollama 推理，可配置模型与超时。
-- **稀疏上云**：按置信度、严重级别与预算决定是否调用云端。
-- **成本感知**：内存内预算跟踪，低预算时可收紧上云策略（见 `config/settings.yaml`）。
-- **多语言**：Python、Java、JavaScript、C/C++（tree-sitter）。
-- **异步编排**：`core/orchestrator.py` 协调 AST → 本地推理 → 策略 → 云端。
-- **多云**：支持 OpenAI、Anthropic、阿里云 DashScope（OpenAI 兼容接口）及自定义兼容端点。
+更细的流程图见：`figures/code_search_pipeline.mmd`（可用 [mermaid.live](https://mermaid.live) 或 VS Code Mermaid 插件查看）。
 
-## 架构概览
+## 核心流水线
 
-```
-代码输入 → AST 热点 → 本地 Ollama → 置信度/策略 → [高置信] 直接输出
-                                              ↘ [需验证] 云端 LLM → 合并结果 → 预算更新
-```
+典型评测入口：`scripts/evaluate_code_search.py`（多语言变体见 `scripts/evaluate_code_search_non_java.py` 及各语言脚本）。
+
+1. **双塔检索**：使用 UniXcoder（或配置的代码编码器）对查询与代码库编码，建索引/加载向量缓存，对每条查询做 **Top-K 相似度排序**。
+2. **（可选）Cross-Encoder 精排**：在 Top-K 上进一步排序，缩小进入 LLM 的候选池（可通过参数关闭或仅用双塔 + Ollama，如 `--bi-ollama-only` / `--bi-ce-only` 等）。
+3. **Ollama**：对候选池生成结构化结果（如 `best_candidate_index`、`needs_escalation`），作为**边缘侧**的主要重排与门控。
+4. **云端**：在 GT 未落入双塔 Top-K 时触发**改写检索**、在更大候选集上再搜、或由云端 API 做**重排/解析**；受配置与预算约束。
+
+编排上复用 `core/orchestrator.py` 中的 **Ollama 会话**、**多云工厂**与**预算/策略**；检索与双塔逻辑在 **`scripts/`** 与 **`shared/`** 中实现。
 
 ## 环境要求
 
 - Python 3.9+
-- [Ollama](https://ollama.com/)（本地推理）
-- 至少配置一个云端提供商的 API Key（见下文环境变量）
+- [Ollama](https://ollama.com/)（本地重排）
+- 运行带云端分支的评测时需配置对应 API Key（见 `.env` 与 `settings.yaml`）
+- GPU/显存：双塔与 Cross-Encoder 依模型与规模而定
 
 ## 安装
 
 ```powershell
-git clone <你的仓库地址>
-cd code-analyze
+git clone https://github.com/ltangwang/code-ana1.git
+cd code-ana1
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-在项目根目录创建 `.env`（该文件已被 `.gitignore` 忽略，勿提交），按需填入密钥，例如：
+Linux / macOS：`source .venv/bin/activate`。
 
-```env
-# 与 config/settings.yaml 中 ${变量名} 对应
-DASHSCOPE_API_KEY=sk-...
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-...
-```
+## 配置
 
-`main.py` 会从 `.env` 读取环境变量，并将 `config/settings.yaml` 里 `cloud.*.api_key` 的 `${变量名}` 替换为对应环境变量值。本机专属路径等可直接改本地 `settings.yaml` 或使用不跟踪的副本（勿将含密钥的文件提交到 Git）。
+- **`config/settings.yaml`**：需在本地创建或从备份复制；**默认被 `.gitignore` 忽略**，避免提交本机模型路径与密钥。
+- **`config/thresholds.yaml`**：阈值等，可随仓库提供。
+- **`.env`**：云端 `API_KEY` 等（勿提交）。
 
-`.gitignore` 中的 `config/secrets.yaml` 供你自行扩展「从单独 YAML 读密钥」时使用；当前默认流程以 `.env` 为准。
+评测脚本从 `settings.yaml` 读取 `ollama`、`cloud`、`budget`、`strategy` 等；双塔模型路径、缓存目录、检索 Top-K 以脚本参数与配置为准，详见各脚本 `--help`。
 
-## Ollama
+## 运行代码检索评测（示例）
 
-安装 Ollama 后拉取与 `config/settings.yaml` 中 `ollama.model_name` 一致的模型，例如：
+具体语言、数据路径、Top-K、是否跳过云端等以你本地 `settings` 与数据集为准，例如：
 
 ```powershell
-ollama pull qwen2.5-coder:7b
+python scripts/evaluate_code_search.py --help
+python scripts/evaluate_code_search_non_java.py --help
 ```
 
-大块模型与 Hugging Face 缓存路径可在 `config/settings.yaml` 的 `models` 段配置；也可通过环境变量 `OLLAMA_MODELS` 指定 Ollama 模型目录（与官方说明一致）。
+常用思路：**准备 CodeSearchNet 预处理数据** → **加载或训练 UniXcoder 检索 checkpoint** → **运行评测脚本** → 结果可写入 `evaluation_runs/`（默认被 git 忽略）。
 
-## 配置说明
+数据集下载可参考仓库根目录 `download_codesearchnet.py`；大型数据与向量缓存目录通常在 `.gitignore` 中。
 
-主配置：`config/settings.yaml`。
-
-- **ollama**：`base_url`、`model_name`、`timeout` 等。
-- **cloud**：`default_provider` 及各厂商的 `api_key`（支持 `${ENV_VAR}` 占位）、`model`、`base_url`。
-- **budget**：总预算、日预算、告警比例等（当前为进程内统计，无数据库持久化）。
-- **strategy**：上云置信度阈值、最大并发云端请求数等。
-- **ast**：圈复杂度、嵌套深度、克隆检测相似度权重等。
-- **clone_detection**：UniXcoder 路径、DFG 骨架、BCB RAG 等与克隆/云端仲裁相关项。
-
-另见 `config/thresholds.yaml`，可与 `settings.yaml` 中的 AST、策略项对照调参（以运行时实际加载的 `settings.yaml` 为准）。
-
-## 命令行用法
-
-```powershell
-# 指定配置文件（可选，默认 config/settings.yaml）
-python main.py --config config/settings.yaml analyze --file examples/sample_code/buggy_python.py
-
-# 扫描目录
-python main.py analyze --dir . --pattern "**/*.py"
-
-# 限制云端调用规模（会写入 strategy 相关覆盖）
-python main.py analyze --file examples/sample_code/buggy_python.py --max-cloud-calls 5
-
-# 导出 JSON
-python main.py analyze --file examples/sample_code/buggy_python.py --output results.json
-
-# 预算状态（内存）
-python main.py budget-status
-
-# 检查已配置的云厂商连通性
-python main.py health-check
-```
-
-语言选项：`--language` 支持 `python` / `java` / `javascript` / `cpp`。
-
-安装本项目包后也可使用入口：`code-analyze`（见 `setup.py` 的 `console_scripts`）。
-
-## 项目结构
+## 项目结构（摘要）
 
 ```
-code-analyze/
-├── main.py                 # CLI 入口
-├── core/                   # 编排、策略、预算
-├── edge/                   # AST、本地推理、置信度、Java DFG 骨架等
-├── cloud/                  # 云厂商客户端与工厂
-├── shared/                 # 模式、提示词、日志
+code-ana1/
+├── scripts/
+│   ├── evaluate_code_search.py      # 检索评测（双塔 + CE + Ollama + 云）
+│   ├── evaluate_code_search_non_java.py
+│   ├── evaluate_code_search_*.py    # 按语言拆分的评测入口
+│   ├── csn_retriever.py / csn_data.py
+│   ├── csn_ce_rerank.py             # Cross-Encoder 精排
+│   └── train_unixcoder_csn*.py      # 双塔/检索模型训练相关
+├── core/                            # 编排、预算、策略（评测复用）
+├── cloud/                           # 云厂商客户端
+├── edge/                            # 本地推理（Ollama）等
+├── shared/                          # CSN 路径、语言 profile、schema 等
+├── figures/code_search_pipeline.mmd # 检索流水线示意图
 ├── config/
-│   ├── settings.yaml       # 主配置（可提交）
-│   └── thresholds.yaml     # 阈值等
-├── scripts/                # 评估与训练辅助脚本（见下）
-├── tests/
-├── examples/sample_code/   # 示例缺陷代码
-├── download_codesearchnet.py   # 下载 CodeSearchNet 到本地目录（默认不入库）
 └── requirements.txt
 ```
 
-## 评估与实验脚本（`scripts/`）
+## 其他脚本
 
-以下脚本依赖 `transformers`、`datasets` 等，已在 `requirements.txt` 中列出。具体参数请使用 `python scripts/<name>.py --help` 查看。
-
-| 脚本 | 用途（概要） |
+| 方向 | 脚本（概要） |
 |------|----------------|
-| `evaluate_clone_detection.py` | 克隆检测评估（UniXcoder 等） |
-| `evaluate_code_search.py` | 代码检索 / Code Search 评估 |
-| `evaluate_defect_detection.py` | 缺陷检测相关评估 |
-| `train_unixcoder_bcb.py` | BigCloneBench 上 UniXcoder 训练流程 |
-| `train_unixcoder_csn.py` | CodeSearchNet 相关训练 |
-| `csn_retriever.py` / `csn_data.py` | CodeSearchNet 检索与数据辅助 |
-| `bcb_rag.py` | BCB RAG 索引与 Few-shot 相关 |
+| 克隆检测评估 | `evaluate_clone_detection.py` |
+| 缺陷检测相关 | `evaluate_defect_detection.py` |
+| BCB 训练/检索 | `train_unixcoder_bcb.py`、`bcb_rag.py` |
 
-**数据集**：`CodeSearchNet_Dataset/` 默认被 `.gitignore` 排除。需要时在仓库根目录执行：
-
-```powershell
-python download_codesearchnet.py
-```
-
-评估产生的 `results_*.json`、`results_*.csv` 等默认也被忽略，避免误提交大文件。
-
-## 运行测试
+## 测试
 
 ```powershell
 pytest
-pytest tests/test_strategy_manager.py
-pytest --cov=. --cov-report=html
 ```
-
-## 日志
-
-使用 `structlog`（JSON 等），运行时可关注上云决策、云端延迟、预算更新等字段，便于对照 `config/settings.yaml` 调试策略。
-
-## 设计理念（简述）
-
-类比推测解码：本地模型快速给出草稿与置信度，云端在必要时做验证或细化；接受/拒绝由策略与预算共同决定，以在成本与质量之间折中。
 
 ## 许可证
 
@@ -159,4 +97,4 @@ MIT License
 
 ## 说明
 
-本仓库为**原型 / 研究向**实现：生产环境使用前请自行做安全审计、密钥管理与充分测试。不要将 `.env` 或含 API Key / 私钥的 YAML 推送到公开远程仓库。
+本仓库用于**研究与实验**。请勿将 `.env`、含真实密钥或内网路径的 `config/settings.yaml` 推送到公开仓库。双塔向量缓存（如 `csn_retriever_emb_*`）、`evaluation_runs/` 等默认已忽略，避免大文件入库。
