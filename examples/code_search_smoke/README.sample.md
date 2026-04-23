@@ -1,14 +1,14 @@
-# Code search smoke fixture (Ruby)
+# Code search sample fixture (Ruby)
 
-## Where this README and data live
+## Where this document and data live
 
 | What | Path (from repository root) |
 |------|------------------------------|
-| **This file** | `examples/code_search_smoke/README.md` |
+| **This file** | `examples/code_search_smoke/README.sample.md` |
 | **Ruby JSONL (index)** | `examples/code_search_smoke/ruby/codebase.jsonl` |
 | **Ruby JSONL (queries)** | `examples/code_search_smoke/ruby/test.jsonl` |
 
-After you clone the repo or browse it on GitHub, open the **`examples/code_search_smoke`** folder: the **`README.md`** next to `ruby/` is this document. There is no other README for this sample.
+After you clone the repo or browse it on GitHub, open the **`examples/code_search_smoke`** folder: **`README.sample.md`** (this file) sits next to **`ruby/`**. It is the only documentation for this sample.
 
 ---
 
@@ -83,7 +83,7 @@ python scripts/evaluate_code_search_ruby.py \
 
 ```
 examples/code_search_smoke/
-├── README.md        # this file
+├── README.sample.md  # this file (sample documentation)
 └── ruby/
     ├── codebase.jsonl   # retrieval index (10 synthetic methods)
     └── test.jsonl       # 3 queries (docstring + gold url)
