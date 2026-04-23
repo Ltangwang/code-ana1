@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 # Align edge retrieve_k, eval K, Ollama/cloud pool, cloud_rescue (same K edge/cloud)
-_RUBY_EVAL_TOP_K = 1
+_RUBY_EVAL_TOP_K = 10
 
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -29,7 +29,7 @@ def _has_long_opt(argv: list[str], name: str) -> bool:
 
 
 def _inject_ruby_eval_k_defaults() -> None:
-    """If not set on CLI, inject top-k / pool / cloud-rescue K aligned to edge K (1)."""
+    """If not set on CLI, inject top-k / pool / cloud-rescue K aligned to edge K (10)."""
     argv = sys.argv[1:]
     k = str(_RUBY_EVAL_TOP_K)
     inserts: list[str] = []

@@ -1,2 +1,3 @@
 {"docstring": "Reverse a UTF-8 string while respecting user-perceived characters (grapheme clusters).", "url": "urn:code-ana1:smoke:ruby:reverse_utf8", "language": "ruby"}
 {"docstring": "Parse a JSON document from a string and return a Ruby Hash.", "url": "urn:code-ana1:smoke:ruby:parse_json", "language": "ruby"}
+{"docstring": "Clamp an integer to a min/max inclusive range.", "url": "urn:code-ana1:smoke:ruby:clamp_int", "language": "ruby"}

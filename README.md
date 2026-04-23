@@ -1,30 +1,41 @@
-# code-ana1：双塔检索 + Ollama + 云端 的代码检索流水线
+# code-ana1: Bi-encoder retrieval + Ollama + cloud code search
 
-本仓库实现 **CodeSearchNet 风格的代码检索**：**双塔（Bi-encoder）** 在全库上做稠密召回，**Ollama** 在候选池上重排与门控，在触发条件与预算允许时由 **云端大模型** 改写查询、扩大检索或重排，以在延迟、成本与效果之间折中。
+This repository implements **CodeSearchNet-style code retrieval**: a **bi-encoder** recalls candidates from the full corpus, **Ollama** reranks and gates on the candidate pool, and a **cloud LLM** can rewrite queries, widen search, and rerank when the pipeline escalates—subject to config and budget.
 
-**仓库地址：** <https://github.com/ltangwang/code-ana1>
+**Repository:** <https://github.com/ltangwang/code-ana1>
 
-更详细的流程图见 `figures/code_search_pipeline.mmd`（可用 [mermaid.live](https://mermaid.live) 或 VS Code Mermaid 插件查看）。
+Flow diagram: `figures/code_search_pipeline.mmd` ([mermaid.live](https://mermaid.live) or a VS Code Mermaid extension).
 
-## 核心流水线
+**Chinese overview (for reading):** see [`README.zh.md`](README.zh.md).
 
-典型评测入口：`scripts/evaluate_code_search.py`（非 Java 与各语言入口见 `scripts/evaluate_code_search_non_java.py` 及按语言划分的脚本）。
+---
 
-1. **双塔检索：** 用 UniXcoder（或配置的编码器）对查询与代码库编码，建索引或加载向量缓存，对每条查询做 **Top-K** 相似度排序。
-2. **（可选）Cross-Encoder 重排：** 在 Top-K 上进一步排序以缩小进入 LLM 的候选池（可关闭，或仅用双塔 + Ollama，例如 `--bi-ollama-only` / `--bi-ce-only`）。
-3. **Ollama：** 在候选池上输出结构化结果（如 `best_candidate_index`、`needs_escalation`），作为 **边侧** 重排与门控。
-4. **云端：** 若 GT 不在双塔 Top-K 内，可触发 **查询改写** / 更大范围检索，或由云端 API **重排/解析**；受配置与预算约束。
+## End-to-end pipeline
 
-编排层在 `core/orchestrator.py` 中复用 **Ollama 会话**、**多云工厂** 与 **预算**；双塔与检索逻辑主要在 **`scripts/`** 与 **`shared/`**。
+Typical entrypoints: `scripts/evaluate_code_search.py` (Java) and `scripts/evaluate_code_search_non_java.py` / per-language wrappers (e.g. `evaluate_code_search_ruby.py`).
 
-## 环境要求
+1. **Bi-encoder:** Encode queries and code with UniXcoder (or a fine-tuned checkpoint), build or load a vector index, **Top-K** dense retrieval (this repo standardizes **K = 10** in docs and smoke defaults unless you override flags).
+2. **(Optional) Cross-encoder:** Rerank the bi-encoder Top-K before the LLM stage (`--use-ce`, or ablations like `--bi-ce-only`).
+3. **Ollama (edge):** Must be **running** locally. The model in `config/settings.yaml` under `ollama` (e.g. `base_url`, `model_name`) is used for structured rerank JSON (`best_candidate_index`, `needs_escalation`, etc.).
+4. **Cloud:** Configure at least one provider in `settings.yaml` / `.env` (`cloud.*.api_key` with `${ENV}` placeholders). Used for query refinement, rescue retrieval, and cloud rerank when the pipeline does not stop at Ollama.
 
-- Python 3.9+
-- [Ollama](https://ollama.com/)（本地重排）
-- 使用云端分支时需配置 API Key（见 `.env` 与 `settings.yaml`）
-- 双塔与 Cross-Encoder 的 GPU/显存依模型与规模而定
+Supporting code: `core/orchestrator.py` (Ollama session, cloud factory, budget), `scripts/`, `shared/`.
 
-## 安装
+---
+
+## Prerequisites
+
+| Component | What you need |
+|-----------|----------------|
+| **Python** | 3.9+ |
+| **Ollama** | Install from [ollama.com](https://ollama.com/), run the daemon, `ollama pull <model>` matching `settings.yaml` → `ollama.model_name`. |
+| **Cloud LLM** | API keys in `.env` and referenced from `settings.yaml` (e.g. OpenAI-compatible or DashScope). Required for full pipeline (not for `--skip-cloud` smoke). |
+| **Hardware** | GPU recommended for UniXcoder / Cross-encoder; CPU possible but slower. |
+| **Config** | Create local `config/settings.yaml` (gitignored by default). See `config/thresholds.yaml` for optional reference values. |
+
+---
+
+## Install
 
 ```powershell
 git clone https://github.com/ltangwang/code-ana1.git
@@ -34,67 +45,81 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Linux / macOS：`source .venv/bin/activate`。
+Linux / macOS: `source .venv/bin/activate`.
 
-## 配置
+---
 
-- **`config/settings.yaml`：** 在本地创建或从备份复制；**默认被 `.gitignore` 忽略**，避免提交本机路径与密钥。
-- **`config/thresholds.yaml`：** 阈值等，可随仓库提供。
-- **`.env`：** 云端 `API_KEY` 等（勿提交）。
+## Configuration (minimal)
 
-评测脚本从 `settings.yaml` 读取 `ollama`、`cloud`、`budget` 及相关项；双塔路径、缓存目录、检索 Top-K 以脚本参数与配置为准，见各脚本 `--help`。
+- **`config/settings.yaml`:** `ollama` block, `cloud` providers, `budget`, `code_search` (paths, `cloud_rescue_k`, etc.). Do not commit secrets.
+- **`.env`:** e.g. `OPENAI_API_KEY`, `DASHSCOPE_API_KEY`, as referenced by your YAML.
 
-## 运行代码检索评测
+Eval scripts substitute `${VAR}` in `cloud.*.api_key` from the environment.
 
-语言、数据路径、Top-K、是否跳过云端等取决于本地 `settings` 与数据集，例如：
+---
+
+## Running evaluation (K = 10)
+
+**Convention:** use **`--top-k 10 --llm-pool-k 10 --cloud-rescue-k 10`** so bi-encoder recall, LLM pool, and cloud rescue share the same K unless you intentionally ablate.
+
+Example (full pipeline, Ruby smoke corpus):
 
 ```powershell
-python scripts/evaluate_code_search.py --help
-python scripts/evaluate_code_search_non_java.py --help
+$env:CSN_LANG_DIR = "$PWD\examples\code_search_smoke\ruby"
+python scripts/evaluate_code_search_ruby.py --sample 3 --top-k 10 --llm-pool-k 10 --cloud-rescue-k 10 --index-size 20 --pretrained-base-only
 ```
 
-常见流程：**准备预处理后的 CodeSearchNet** → **加载或训练 UniXcoder 检索 checkpoint** → **运行评测脚本** → 结果可写入 `evaluation_runs/`（默认被 git 忽略）。
+Before running:
 
-数据集下载：仓库根目录 `download_codesearchnet.py`；大体量数据与向量缓存通常在 `.gitignore` 中。
+1. Start **Ollama** and ensure `ollama.model_name` is pulled.
+2. Fill **cloud** keys for the providers your `settings.yaml` uses.
+3. For real benchmarks, point `CSN_LANG_DIR` (or language dirs under `CodeSearchNet_clean_Dataset`) at full **GraphCodeBERT-clean** splits—not only the smoke fixture.
 
-## 项目结构（摘要）
+Bi-encoder-only quick check (no Ollama, no cloud):
+
+```powershell
+python scripts/evaluate_code_search_ruby.py --sample 3 --skip-cloud --top-k 10 --llm-pool-k 10 --cloud-rescue-k 10 --index-size 20 --pretrained-base-only
+```
+
+See also: `examples/code_search_smoke/README.md`.
+
+---
+
+## Project layout (summary)
 
 ```
 code-ana1/
-├── scripts/
-│   ├── evaluate_code_search.py      # 检索评测（双塔 + CE + Ollama + 云）
-│   ├── evaluate_code_search_non_java.py
-│   ├── evaluate_code_search_*.py    # 按语言的评测入口
-│   ├── csn_retriever.py / csn_data.py
-│   ├── csn_ce_rerank.py             # Cross-Encoder 重排
-│   └── train_unixcoder_csn*.py      # 双塔 / 检索训练
-├── core/                            # 编排与预算（评测复用）
-├── cloud/                           # 云厂商客户端
-├── edge/                            # 本地推理（Ollama）等
-├── shared/                          # CSN 路径、语言 profile、schema 等
-├── figures/code_search_pipeline.mmd # 流水线示意图
-├── examples/code_search_smoke/      # 极小 Ruby JSONL 样例（格式 + 冒烟；见其 README）
+├── scripts/                    # Eval, training, retriever, CE rerank
+├── core/                       # Orchestration + budget
+├── cloud/                      # Provider clients
+├── edge/                       # Ollama local inference, Java DFG helpers
+├── shared/                     # CSN paths, language profiles, schemas
+├── figures/code_search_pipeline.mmd
+├── examples/code_search_smoke/ # Tiny Ruby JSONL; English README (+ README.zh.md)
+├── README.zh.md                # Chinese overview (GitHub primary doc is README.md)
 ├── config/
 └── requirements.txt
 ```
 
-## 其它脚本
+---
 
-| 方向 | 脚本（概要） |
-|------|----------------|
-| 克隆检测 | `evaluate_clone_detection.py` |
-| BCB 训练 / RAG | `train_unixcoder_bcb.py`、`bcb_rag.py` |
+## Other scripts
 
-## 测试
+| Area | Scripts |
+|------|---------|
+| Clone detection | `evaluate_clone_detection.py` |
+| BCB train / RAG | `train_unixcoder_bcb.py`, `bcb_rag.py` |
+
+## Tests
 
 ```powershell
 pytest
 ```
 
-## 许可证
+## License
 
 MIT License
 
-## 说明
+## Note
 
-本仓库用于 **研究与实验**。请勿将 `.env`、真实密钥或含内网路径的 `config/settings.yaml` 推送到公开远程。双塔缓存（如 `csn_retriever_emb_*`）、`evaluation_runs/` 等默认已忽略，避免大文件进入 git。
+Research / experiments only. Do not push `.env`, real keys, or machine-specific `settings.yaml` to a public remote. Caches (`csn_retriever_emb_*`), `evaluation_runs/`, etc. are gitignored by default.

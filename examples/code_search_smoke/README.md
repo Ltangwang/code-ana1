@@ -1,51 +1,82 @@
-# 代码检索冒烟数据（Ruby）
+# Code search smoke fixture (Ruby)
 
-**为什么选 Ruby？** 在 CodeSearchNet 论文（Husain et al., 2019）中，六种语言里 **Ruby 带文档的函数数量最少**（Table 1：约 5.7 万条有文档函数；Go、PHP、Python、Java、JavaScript 都更大）。本仓库提供体积极小的 **合成 JSONL**，字段形态与 GraphCodeBERT 清洗导出一致（`docstring`、`original_string`、`url`），便于在不下载完整语料的情况下 **检查路径与解析是否正常**。
+**Why Ruby?** In CodeSearchNet (Husain et al., 2019), **Ruby has the smallest documented-function count** among the six languages (Table 1, ~57k vs larger languages). This folder ships **synthetic JSONL** in GraphCodeBERT-clean style (`docstring`, `original_string`, `url`) to exercise parsers and paths **without the full corpus**.
 
-**不能用来报告正式榜单指标。** 真实的 MRR、Success@K 请使用官方 CodeSearchNet / 清洗划分数据。
+**Not for publishing benchmark scores.** Use official CodeSearchNet / cleaned splits for MRR and Success@K.
 
-## 目录结构
+**Chinese version:** [`README.zh.md`](README.zh.md).
 
-```
-examples/code_search_smoke/ruby/
-├── codebase.jsonl   # 小型检索索引（4 个方法）
-└── test.jsonl       # 2 条查询（自然语言 + 金标 url；可无代码正文）
-```
+---
 
-## 运行方式（仅双塔，不开 Ollama / 云端）
+## Full pipeline (Ollama + cloud, **K = 10**)
 
-在仓库根目录，将 `CSN_LANG_DIR` 指向本目录下的 `ruby` 文件夹（**建议使用绝对路径**）。
+This matches the intended **end-to-end** run: bi-encoder → (optional CE) → **Ollama** → **cloud** when escalated.
+
+### Before you run
+
+1. **Ollama:** Install and start the service. `ollama pull <model>` for the model named in `config/settings.yaml` → `ollama.model_name`.
+2. **Cloud:** Set API keys in `.env` and wire `cloud.*` in `settings.yaml` (e.g. `${OPENAI_API_KEY}`).
+3. **Config:** Local `config/settings.yaml` must exist (see repository root `README.md`).
+4. **K:** Use **`--top-k 10 --llm-pool-k 10 --cloud-rescue-k 10`** so retrieval, LLM pool, and cloud rescue share **K = 10**.
+
+### Commands
+
+Repository root; point `CSN_LANG_DIR` at this `ruby` folder (absolute path recommended).
 
 **Linux / macOS**
 
 ```bash
 export CSN_LANG_DIR="$(pwd)/examples/code_search_smoke/ruby"
 python scripts/evaluate_code_search_ruby.py \
-  --sample 2 \
-  --skip-cloud \
-  --top-k 4 \
-  --llm-pool-k 4 \
-  --cloud-rescue-k 4 \
-  --index-size 10 \
+  --sample 3 \
+  --top-k 10 \
+  --llm-pool-k 10 \
+  --cloud-rescue-k 10 \
+  --index-size 20 \
   --pretrained-base-only
 ```
 
-**Windows（PowerShell）**
+**Windows (PowerShell)**
 
 ```powershell
 $env:CSN_LANG_DIR = "$PWD\examples\code_search_smoke\ruby"
 python scripts/evaluate_code_search_ruby.py `
-  --sample 2 `
-  --skip-cloud `
-  --top-k 4 `
-  --llm-pool-k 4 `
-  --cloud-rescue-k 4 `
-  --index-size 10 `
+  --sample 3 `
+  --top-k 10 `
+  --llm-pool-k 10 `
+  --cloud-rescue-k 10 `
+  --index-size 20 `
   --pretrained-base-only
 ```
 
-你仍需要本地的 `config/settings.yaml`（见仓库根目录 README）、运行 UniXcoder 所需的 GPU/CPU 内存，以及首次使用 `--pretrained-base-only` 时访问 Hugging Face 缓存以下载基座模型。
+First-time `--pretrained-base-only` will download UniXcoder base weights from Hugging Face.
 
-## 许可与来源
+### Bi-encoder only (no Ollama, no cloud)
 
-本目录内所有代码片段与 docstring 均为 **合成数据**（为本仓库编写），可随项目一并分发。
+For a quick shape check:
+
+```bash
+export CSN_LANG_DIR="$(pwd)/examples/code_search_smoke/ruby"
+python scripts/evaluate_code_search_ruby.py \
+  --sample 3 \
+  --skip-cloud \
+  --top-k 10 \
+  --llm-pool-k 10 \
+  --cloud-rescue-k 10 \
+  --index-size 20 \
+  --pretrained-base-only
+```
+
+---
+
+## Layout
+
+```
+examples/code_search_smoke/ruby/
+├── codebase.jsonl   # retrieval index (10 synthetic methods)
+└── test.jsonl       # 3 queries (docstring + gold url)
+```
+
+## License / provenance
+
+All snippets and docstrings are **synthetic** for this repository and may be redistributed with the project.
