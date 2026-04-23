@@ -1,35 +1,35 @@
-%% Edge-Cloud 代码检索评测流水线（evaluate_code_search.py）
-%% 可用 VS Code Mermaid 插件、https://mermaid.live 或 mermaid-cli 导出 PNG/SVG
+%% Edge–cloud code search eval pipeline (evaluate_code_search.py)
+%% View with VS Code Mermaid extension, https://mermaid.live, or mermaid-cli for PNG/SVG
 
 flowchart TB
-  subgraph init ["初始化"]
-    A["加载配置 settings.yaml"] --> B["加载 UniXcoder\n本地 checkpoint 或 microsoft/unixcoder-base"]
-    B --> C["从 codebase.jsonl 建双塔索引\n向量缓存 npz"]
-    C --> D["加载 test.jsonl 查询"]
-    D --> E{"可选: Cross-Encoder\nOllama health_check"}
+  subgraph init ["Init"]
+    A["Load config settings.yaml"] --> B["Load UniXcoder\nlocal checkpoint or microsoft/unixcoder-base"]
+    B --> C["Build bi-encoder index from codebase.jsonl\nvector cache npz"]
+    C --> D["Load test.jsonl queries"]
+    D --> E{"Optional: Cross-Encoder\nOllama health_check"}
   end
 
-  subgraph perq ["每条查询"]
-    Q["query + GT url"] --> R["双塔: 全库相似度排序\ntop retrieve_k"]
-    R --> H{"GT 在 retrieve_k 内?"}
-    H -->|否| RF["云端：改写检索用语\n(JSON refined_search_query)"]
-    RF --> R50["双塔：用改写句从全库\n召回 top cloud_rescue_k 候选"]
-    R50 --> CR["云端：在候选池上\n选定 best_index"]
+  subgraph perq ["Per query"]
+    Q["query + GT url"] --> R["Bi-encoder: full-corpus sim rank\ntop retrieve_k"]
+    R --> H{"GT in top retrieve_k?"}
+    H -->|no| RF["Cloud: rewrite search phrase\n(JSON refined_search_query)"]
+    RF --> R50["Bi-encoder: query rewrite\nfull-corpus top cloud_rescue_k"]
+    R50 --> CR["Cloud: pick best_index in pool"]
     CR --> MET
-    H -->|是| CE["CE 重排\n或 --no-ce 跳过"]
-    CE --> P["取前 llm_pool_k → pool"]
-    P --> O["Ollama 重排 JSON\nbest_candidate_index + needs_escalation"]
-    O --> OK{"Ollama OK\n且不需 escalation?"}
-    OK -->|是| DONE["ollama_ok"]
-    OK -->|否| BUD{"预算可支付?"}
-    BUD -->|否| BF["budget_after_ollama_fail"]
-    BUD -->|是| CL["云端 API 重排"]
-    CL --> PAR{"解析有效 index?"}
-    PAR -->|否| IP["cloud_invalid_parse"]
-    PAR -->|是| CS["cloud_success_after_fallback"]
+    H -->|yes| CE["CE rerank\nor --no-ce skip"]
+    CE --> P["Take top llm_pool_k → pool"]
+    P --> O["Ollama JSON rerank\nbest_candidate_index + needs_escalation"]
+    O --> OK{"Ollama OK\nand no escalation?"}
+    OK -->|yes| DONE["ollama_ok"]
+    OK -->|no| BUD{"Budget OK?"}
+    BUD -->|no| BF["budget_after_ollama_fail"]
+    BUD -->|yes| CL["Cloud API rerank"]
+    CL --> PAR{"Valid index parse?"}
+    PAR -->|no| IP["cloud_invalid_parse"]
+    PAR -->|yes| CS["cloud_success_after_fallback"]
   end
 
-  MET["汇总指标"]
+  MET["Aggregate metrics"]
   init --> perq
   DONE --> MET
   BF --> MET

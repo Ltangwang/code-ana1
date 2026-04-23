@@ -1,7 +1,7 @@
 """
-Java 方法片段的近似 DFG 骨架：将赋值/返回等右侧的调用链序列化为文本，
-例如：digest -> call:MessageDigest.getInstance -> call:update
-（完整程序级 DFG 需 SSA/指针分析；此处服务于克隆检测提示词增强。）
+Approximate DFG-style skeleton for Java method snippets: serialize RHS call chains as text, e.g.
+digest -> call:MessageDigest.getInstance -> call:update
+(Full program DFG needs SSA/pointer analysis; this augments clone-detection prompts.)
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ def _strip_java_comments(code: str) -> str:
 
 
 def _rhs_to_call_chain(rhs: str) -> str:
-    """从右侧表达式抽取按出现顺序的调用链 call:Qualifier.name 或 call:name。"""
+    """Extract call chain call:Qualifier.name or call:name in occurrence order from RHS."""
     rhs = (rhs or "").strip()
     if not rhs:
         return ""
@@ -37,7 +37,7 @@ def _rhs_to_call_chain(rhs: str) -> str:
             parts.append(f"call:{name}")
     if parts:
         return " -> ".join(parts)
-    # 无调用：标量 / 变量引用
+    # No calls: scalar / variable ref
     v = re.sub(r"\s+", " ", rhs)[:48]
     return f"val:{v}" if v else ""
 
@@ -54,7 +54,7 @@ def _dfg_edges_regex(java: str, max_edges: int) -> List[str]:
         if lhs and chain:
             edges.append(f"{lhs} -> {chain}")
 
-    # 局部声明：大致 Type name = rhs;（避免匹配过宽）
+    # Local decl: roughly Type name = rhs; (avoid over-matching)
     for m in re.finditer(
         r"(?:^|[;{}])\s*[\w.<>\[\],\s]+\s+(\w+)\s*=\s*([^;]+);",
         s,
@@ -62,7 +62,7 @@ def _dfg_edges_regex(java: str, max_edges: int) -> List[str]:
     ):
         add(m.group(1), m.group(2))
 
-    # 简单赋值：name = rhs;（排除 ==、<= 等）
+    # Simple assign: name = rhs; (exclude ==, <=, etc.)
     for m in re.finditer(
         r"(?:^|[;{}])\s*(\w+)\s*=\s*([^;]+);",
         s,
@@ -80,7 +80,7 @@ def _dfg_edges_regex(java: str, max_edges: int) -> List[str]:
         if len(edges) >= max_edges:
             break
 
-    # 调用语句：receiver.method( ... );
+    # Call statement: receiver.method( ... );
     for m in re.finditer(r"(?:^|[;{}])\s*([\w]+)\.(\w+)\s*\(", s, re.MULTILINE):
         if len(edges) >= max_edges:
             break
@@ -162,12 +162,12 @@ def extract_java_dfg_skeleton(
     prefer_tree_sitter: bool = True,
 ) -> str:
     """
-    将近似数据流边序列化为单行/短文本，供 LLM 与源码对照。
+    Serialize approximate data-flow edges to one line / short text for LLM vs source.
 
     Args:
-        java: Java 方法或片段源码
-        max_edges: 最多保留的边数
-        prefer_tree_sitter: 若 tree-sitter-java 可用且解析出边则优先使用
+        java: Java method or snippet source
+        max_edges: max edges to keep
+        prefer_tree_sitter: prefer tree-sitter-java edges when available
     """
     if not (java or "").strip():
         return "(empty snippet)"

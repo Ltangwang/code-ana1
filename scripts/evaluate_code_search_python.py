@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-CodeSearchNet 清洗版 Python 评测入口。
+CodeSearchNet (clean) Python evaluation entrypoint.
 
-双塔权重：优先 config/settings.yaml 的 code_search.unixcoder_model_path_python；
-未配置或目录不存在时，用环境变量 CODE_SEARCH_UNIXCODER_PYTHON_PATH（本入口默认设为
-unixcoder-csn-python 输出目录，与 Java 的 clone_detection.unixcoder.model_path 分离）。
+Bi-encoder weights: prefer config/settings.yaml code_search.unixcoder_model_path_python;
+if missing or not a directory, use env CODE_SEARCH_UNIXCODER_PYTHON_PATH (this entry
+defaults it to the unixcoder-csn-python output dir, separate from Java
+clone_detection.unixcoder.model_path).
 
-本入口默认将边侧双塔召回、Success@K、Ollama/云候选池与 no_edge 云解救召回的 top-K
-对齐为同一数值（见 _PYTHON_EVAL_TOP_K）；命令行显式传入 --top-k / --llm-pool-k /
---cloud-rescue-k 时仍以命令行为准。
+By default, align edge bi-encoder recall, Success@K, Ollama/cloud pool, and no_edge
+cloud-rescue top-K (_PYTHON_EVAL_TOP_K). CLI --top-k / --llm-pool-k / --cloud-rescue-k
+override when provided.
 """
 
 from __future__ import annotations
 
-# 边侧 retrieve_k、评测 K、Ollama/云池子、cloud_rescue 的 max(retrieve_k,·) 对齐用
+# Default K for edge retrieve_k, eval K, Ollama/cloud pool, cloud_rescue alignment
 _PYTHON_EVAL_TOP_K = 5
 
 import os
@@ -32,7 +33,7 @@ def _has_long_opt(argv: list[str], name: str) -> bool:
 
 
 def _inject_python_eval_k_defaults() -> None:
-    """未在 CLI 指定时，将 top-k / 云边池子 / 云解救召回与边侧 K 对齐。"""
+    """If not set on CLI, inject top-k / pool / cloud-rescue K aligned to edge K."""
     argv = sys.argv[1:]
     k = str(_PYTHON_EVAL_TOP_K)
     inserts: list[str] = []

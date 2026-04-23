@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-将本地 GraphCodeBERT 风格清洗数据与 GitHub 官方说明中的规模逐条对比。
+Compare local GraphCodeBERT-style cleaned data line counts to the official GitHub tables.
 
-参考（2024 起仍见于 microsoft/CodeBERT 仓库）：
+Reference (still in microsoft/CodeBERT as of 2024):
   https://github.com/microsoft/CodeBERT/blob/master/GraphCodeBERT/codesearch/README.md
-  表中 Dev 列对应常见导出文件名 valid.jsonl（或 validation.jsonl）。
+  Dev column usually maps to valid.jsonl (or validation.jsonl).
 
-用法：
+Usage:
   python scripts/check_csn_clean_vs_graphcodebert_official.py
   python scripts/check_csn_clean_vs_graphcodebert_official.py --root /path/to/CodeSearchNet_clean_Dataset
   python scripts/check_csn_clean_vs_graphcodebert_official.py --validate-json
@@ -25,7 +25,7 @@ if str(_ROOT) not in sys.path:
 
 from shared.csn_paths import default_csn_clean_dataset_root
 
-# 与官方 README「Data statistic about the cleaned dataset」表一致（Training / Dev / Test / Candidates code）
+# Matches official README "Data statistic about the cleaned dataset" (Training / Dev / Test / Candidates code)
 _OFFICIAL: dict[str, dict[str, int]] = {
     "python": {
         "train": 251_820,
@@ -90,7 +90,7 @@ def _dev_path(lang_dir: Path) -> Path | None:
 
 
 def _validate_jsonl(path: Path, max_lines: int | None = None) -> tuple[int, int]:
-    """返回 (json 错误行数, 已扫描非空行数)。"""
+    """Returns (json_error_lines, scanned_nonempty_lines)."""
     bad = 0
     n = 0
     with path.open(encoding="utf-8", errors="replace") as f:
@@ -110,18 +110,18 @@ def _validate_jsonl(path: Path, max_lines: int | None = None) -> tuple[int, int]
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="对照 microsoft/CodeBERT GraphCodeBERT/codesearch README 官方规模检查清洗数据"
+        description="Check cleaned data vs microsoft/CodeBERT GraphCodeBERT/codesearch README sizes"
     )
     parser.add_argument(
         "--root",
         type=str,
         default=None,
-        help="清洗数据根（默认 CSN_CLEAN_OUTPUT_DIR 或 default_csn_clean_dataset_root）",
+        help="Cleaned data root (default CSN_CLEAN_OUTPUT_DIR or default_csn_clean_dataset_root)",
     )
     parser.add_argument(
         "--validate-json",
         action="store_true",
-        help="对全部 jsonl 做逐行 json.loads（大文件较慢，用于查坏行）",
+        help="json.loads every jsonl line (slow on large files; finds bad lines)",
     )
     args = parser.parse_args()
     root = (
@@ -130,8 +130,11 @@ def main() -> None:
         else default_csn_clean_dataset_root()
     )
 
-    print("官方参考: microsoft/CodeBERT GraphCodeBERT/codesearch/README.md（cleaned dataset 统计表）")
-    print(f"本地根目录: {root}\n")
+    print(
+        "Reference: microsoft/CodeBERT GraphCodeBERT/codesearch/README.md "
+        "(cleaned dataset stats table)"
+    )
+    print(f"Local root: {root}\n")
 
     any_fail = False
     rows: list[tuple[str, str, str, str, str]] = []
@@ -140,7 +143,7 @@ def main() -> None:
         ref = _OFFICIAL[lang]
         d = root / lang
         if not d.is_dir():
-            print(f"[{lang}] 目录不存在: {d}")
+            print(f"[{lang}] directory missing: {d}")
             any_fail = True
             rows.append((lang, "MISSING", "-", "-", "-"))
             continue
@@ -204,17 +207,22 @@ def main() -> None:
             )
         )
 
-    print("---- 汇总表（非空行数；dev=valid.jsonl 或 validation.jsonl）----")
+    print("---- Summary (nonempty lines; dev=valid.jsonl or validation.jsonl) ----")
     print(f"{'lang':12} {'train':>10} {'dev':>10} {'test':>10} {'codebase':>10}")
     for lang, tr, de, te, cb in rows:
         print(f"{lang:12} {tr:>10} {de:>10} {te:>10} {cb:>10}")
 
     if any_fail:
-        print("\n结论: 存在与官方表不一致或缺失文件，请核对预处理版本/是否下全。")
+        print(
+            "\nConclusion: mismatch or missing files vs the official table; "
+            "check preprocess version / download completeness."
+        )
         sys.exit(1)
-    print("\n结论: 各语言 train/dev/test/codebase 非空行数与 GitHub 官方 README 表一致。")
+    print(
+        "\nConclusion: train/dev/test/codebase nonempty line counts match the GitHub README table."
+    )
     if not args.validate_json:
-        print("（未做 --validate-json；若需逐行 JSON 校验请重跑并加该参数。）")
+        print("(Did not run --validate-json; rerun with that flag for per-line JSON validation.)")
 
 
 if __name__ == "__main__":

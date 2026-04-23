@@ -1,5 +1,5 @@
 """
-BCB 训练集句对 RAG：用 UniXcoder 的 RoBERTa 主干 CLS 嵌入做相似检索，供云端 Few-shot。
+BCB train-pair RAG: UniXcoder RoBERTa backbone CLS embeddings for similarity retrieval, cloud few-shot.
 """
 
 from __future__ import annotations
@@ -122,7 +122,7 @@ def _cache_key(base_dir: Path, max_pairs: int, seed: int, max_length: int) -> st
 
 
 class BCBRAGRetriever:
-    """训练集句对嵌入 + 余弦 Top-K 检索。"""
+    """Train-pair embeddings + cosine Top-K retrieval."""
 
     def __init__(
         self,
@@ -211,7 +211,7 @@ class BCBRAGRetriever:
         import torch
 
         print(
-            f"BCB RAG: 构建 UniXcoder 嵌入索引 ({len(records)} 对)，"
+            f"BCB RAG: building UniXcoder embedding index ({len(records)} pairs), "
             f"encode_max_length={encode_len} ..."
         )
         embs: List[np.ndarray] = []

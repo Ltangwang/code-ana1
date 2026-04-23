@@ -247,22 +247,22 @@ def main() -> None:
         "--train-jsonl",
         type=str,
         default=None,
-        help=f"默认: {default_train}（若存在）",
+        help=f"Default: {default_train} (if it exists).",
     )
     parser.add_argument(
         "--valid-jsonl",
         type=str,
         default=None,
-        help=f"默认: {default_valid}（若存在）。若设置 --valid-split-ratio>0 则从 train 划分，忽略本项。",
+        help=f"Default: {default_valid} (if it exists). If --valid-split-ratio>0, split from train and ignore this.",
     )
     parser.add_argument(
         "--valid-split-ratio",
         type=float,
         default=0.0,
         help=(
-            "从 train-jsonl 已加载样本中按 seed 随机划出验证集比例，例如 0.03=3%%。"
-            "用于 GraphCodeBERT 清洗版 valid/test 无代码正文的情形；勿从 test 划分以免泄漏。"
-            ">0 时不再读取 --valid-jsonl。"
+            "Random dev fraction from already-loaded train-jsonl rows (seeded), e.g. 0.03=3%%. "
+            "For GraphCodeBERT cleaned splits where valid/test may lack code; never split from test to avoid leakage. "
+            "If >0, --valid-jsonl is not read."
         ),
     )
     parser.add_argument(
@@ -275,7 +275,7 @@ def main() -> None:
         "--hf-cache",
         type=str,
         default=None,
-        help="默认: config settings models.huggingface_cache 或数据盘 .cache/huggingface",
+        help="Default: config settings models.huggingface_cache or data disk .cache/huggingface",
     )
     parser.add_argument("--max-length", type=int, default=512)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -283,7 +283,7 @@ def main() -> None:
         "--grad-accum-steps",
         type=int,
         default=4,
-        help="梯度累积步数；等效 batch ≈ batch_size * 本值（与既有 csn_train_args.json 一致）",
+        help="Gradient accumulation steps; effective batch ≈ batch_size * this (same as existing csn_train_args.json).",
     )
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--learning-rate", type=float, default=1e-5)
@@ -294,7 +294,7 @@ def main() -> None:
         "--label-smoothing",
         type=float,
         default=0.05,
-        help="对称 InfoNCE 上 cross_entropy 的 label_smoothing",
+        help="label_smoothing for symmetric InfoNCE cross_entropy.",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--min-query-chars", type=int, default=5)
@@ -302,43 +302,43 @@ def main() -> None:
     parser.add_argument(
         "--clean-query",
         action="store_true",
-        help="对 NL/code 做空白归一化（默认关闭，与既有快照一致）",
+        help="Normalize whitespace on NL/code (off by default; matches existing snapshots).",
     )
     parser.add_argument(
         "--train-max-samples",
         type=int,
         default=0,
-        help="读取 train-jsonl 的最大行数；<=0 表示不限制（全量）。默认 0。",
+        help="Max lines to read from train-jsonl; <=0 means no limit (full file). Default 0.",
     )
     parser.add_argument(
         "--valid-max-samples",
         type=int,
         default=5000,
-        help="仅在使用 --valid-jsonl 时限制读取条数；--valid-split-ratio 划分不受此项截断。",
+        help="When using --valid-jsonl only, cap lines read; --valid-split-ratio split is not truncated by this.",
     )
     parser.add_argument(
         "--no-amp",
         action="store_true",
-        help="关闭 CUDA 混合精度（默认与 csn_train_args 一致：CUDA 上开启 AMP）",
+        help="Disable CUDA mixed precision (default matches csn_train_args: AMP on CUDA).",
     )
     parser.add_argument(
         "--num-workers",
         type=int,
         default=0,
-        help="DataLoader worker 数（>0 时并发读盘；默认 0 便于复现）",
+        help="DataLoader num_workers (>0 for parallel IO; 0 by default for reproducibility).",
     )
     parser.add_argument(
         "--strip-python-code-docstrings",
         action="store_true",
         help=(
-            "训练前从 code 侧用 AST 去掉模块/类/函数体首条 docstring，"
-            "减弱「query 与 code 字面重合」；需与评测索引侧 strip 配置一致。"
+            "Before training, strip first module/class/function docstring on code with AST, "
+            "reducing query–code literal overlap; must match eval index strip settings."
         ),
     )
     parser.add_argument(
         "--no-strip-python-code-docstrings",
         action="store_true",
-        help="与 --strip-python-code-docstrings 同时出现时本项优先，关闭去 docstring。",
+        help="If set together with --strip-python-code-docstrings, this wins and keeps docstrings.",
     )
     args = parser.parse_args()
 
@@ -347,20 +347,20 @@ def main() -> None:
     split_ratio = float(args.valid_split_ratio)
     if not train_path.is_file():
         raise FileNotFoundError(
-            f"未找到训练集: {train_path}\n"
-            "请设置 CSN_OUTPUT_DIR / CSN_JAVA_DIR 或传入 --train-jsonl。"
+            f"Training set not found: {train_path}\n"
+            "Set CSN_OUTPUT_DIR / CSN_JAVA_DIR or pass --train-jsonl."
         )
     if split_ratio <= 0.0:
         if not valid_path.is_file():
             raise FileNotFoundError(
-                f"未找到验证集: {valid_path}\n"
-                "请传入 --valid-jsonl，或使用 --valid-split-ratio 从 train 中划分验证集。"
+                f"Validation set not found: {valid_path}\n"
+                "Pass --valid-jsonl, or use --valid-split-ratio to split validation from train."
             )
     elif split_ratio >= 1.0:
-        raise ValueError("--valid-split-ratio 须为 (0,1) 内小数，例如 0.05")
+        raise ValueError("--valid-split-ratio must be a decimal in (0,1), e.g. 0.05")
     elif args.valid_jsonl:
         print(
-            "提示: 已设置 --valid-split-ratio>0，将忽略 --valid-jsonl，验证集仅从 train 划分。"
+            "Note: --valid-split-ratio>0 is set; --valid-jsonl is ignored; validation is split from train only."
         )
 
     _apply_hf_cache(_resolve_hf_cache(args.hf_cache))
@@ -385,31 +385,31 @@ def main() -> None:
         strip_python_code_docstrings=strip_docs,
     )
     if not train_records:
-        raise RuntimeError(f"{train_path} 中无有效 (NL+code) 样本，请检查 JSONL 格式。")
+        raise RuntimeError(f"{train_path} has no valid (NL+code) rows; check JSONL format.")
     print(
-        f"已加载训练样本: {len(train_records)} 对"
-        f"（train_max_samples={'全量' if train_max_arg is None else train_max}）"
-        f"{'；已启用 code 侧去 docstring' if strip_docs else ''}"
+        f"Loaded training pairs: {len(train_records)} "
+        f"(train_max_samples={'full' if train_max_arg is None else train_max})"
+        f"{' ; code-side docstring stripping on' if strip_docs else ''}"
     )
 
     if split_ratio > 0.0:
         if len(train_records) < 2:
             raise RuntimeError(
-                "train 有效样本不足 2 条，无法划分验证集；请增大数据或使用 --valid-jsonl。"
+                "Fewer than 2 valid train rows; cannot split validation. Add data or use --valid-jsonl."
             )
         rng = np.random.RandomState(args.seed)
         order = rng.permutation(len(train_records))
         n_v = max(1, int(len(train_records) * split_ratio))
         n_v = min(n_v, len(train_records) - 1)
-        # 从 train 划分时仅按比例，不用 valid_max_samples 截断（否则 10% 会被压成 5k）
+        # When splitting from train, use ratio only; do not cap with valid_max_samples
         valid_records = [train_records[i] for i in order[:n_v]]
         train_records = [train_records[i] for i in order[n_v:]]
         if not train_records or not valid_records:
             raise RuntimeError(
-                "从 train 划分 valid 后 train 或 valid 为空，请增大数据或减小 --valid-split-ratio。"
+                "After train split, train or valid is empty. Add more data or lower --valid-split-ratio."
             )
         print(
-            f"已从 train 随机划分验证集: valid={len(valid_records)}, train={len(train_records)} "
+            f"Random train split for validation: valid={len(valid_records)}, train={len(train_records)} "
             f"(ratio≈{split_ratio}, seed={args.seed})"
         )
     else:
@@ -422,7 +422,7 @@ def main() -> None:
             strip_python_code_docstrings=strip_docs,
         )
         if not valid_records:
-            raise RuntimeError(f"{valid_path} 中无有效 (NL+code) 样本。")
+            raise RuntimeError(f"{valid_path} has no valid (NL+code) rows.")
 
     train_ds = CSNDataset(train_records)
     valid_ds = CSNDataset(valid_records)
@@ -494,8 +494,8 @@ def main() -> None:
     _save_train_args_json(out_dir, snap)
     if n_batches % accum != 0:
         print(
-            f"注意: 每 epoch 批次数 {n_batches} 不能整除 grad_accum_steps={accum}，"
-            "最后一个累积组梯度尺度可能略有偏差；可调样本数或 batch_size。"
+            f"Note: batches per epoch {n_batches} is not divisible by grad_accum_steps={accum}; "
+            "last accumulation group may have a small gradient scale skew; adjust sample count or batch_size."
         )
 
     global_sched_step = 0

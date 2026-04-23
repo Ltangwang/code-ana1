@@ -4,12 +4,13 @@ from typing import Any, Dict, Iterator, List
 
 from shared.csn_python_code_strip import strip_python_code_docstrings as _strip_py_docs
 
+
 def iter_csn_jsonl(file_path: str | Path) -> Iterator[Dict[str, Any]]:
     """
     Iterate over a CodeSearchNet JSONL file and yield parsed dictionaries.
-    支持两种 JSON 字段风格：
-    - HuggingFace code_search_net：func_documentation_string、func_code_string、func_code_url
-    - GraphCodeBERT / 清洗导出：docstring 或 docstring_tokens、original_string、url
+    Two JSON field styles are supported:
+    - HuggingFace code_search_net: func_documentation_string, func_code_string, func_code_url
+    - GraphCodeBERT / cleaned export: docstring or docstring_tokens, original_string, url
     - func_name: The name of the function.
     - repository_name: The source repository.
     - func_code_url: The URL to the source code.
@@ -25,7 +26,7 @@ def iter_csn_jsonl(file_path: str | Path) -> Iterator[Dict[str, Any]]:
                 continue
             try:
                 item = json.loads(line)
-                # HuggingFace / 原始 CodeSearchNet
+                # HuggingFace / raw CodeSearchNet
                 code = item.get("func_code_string") or item.get("original_string") or ""
                 nl = (
                     item.get("func_documentation_string")
@@ -54,8 +55,8 @@ def load_csn_dataset(
 ) -> List[Dict[str, Any]]:
     """
     Load up to max_samples from a CodeSearchNet JSONL file.
-    require_code=True：保留 NL+code（训练/部分 HF test）。
-    require_code=False：保留 NL 且（url 或 code），适用于 GraphCodeBERT 清洗 test（仅查询+url）。
+    require_code=True: keep rows with NL+code (train / some HF test).
+    require_code=False: keep rows with NL and (url or code), for GraphCodeBERT cleaned test (query+url only).
     """
     data = []
     for i, item in enumerate(iter_csn_jsonl(file_path)):
@@ -82,7 +83,7 @@ def load_csn_code_corpus(
     """
     Load code snippets for a retrieval index (e.g. codebase.jsonl).
     Only non-empty code is required; NL may be empty.
-    strip_python_docstrings：对 Python 片段用 AST 去掉函数/类/模块首条 docstring，与训练侧一致。
+    strip_python_docstrings: for Python, strip first class/function/module docstring via AST, aligned with training.
     """
     data = []
     for i, item in enumerate(iter_csn_jsonl(file_path)):

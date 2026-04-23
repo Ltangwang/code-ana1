@@ -2,8 +2,8 @@
 """
 CodeXGLUE BigCloneBench clone detection evaluation.
 
-Pipeline: UniXcoder (edge) → 收窄灰区 → 云端多步仲裁（可选 BCB RAG Few-shot +
-本地 Symbolic Trace / 控制流报告 / 近似 DFG 骨架；可选双次云调用）。
+Pipeline: UniXcoder (edge) → narrow gray zone → multi-step cloud arbitration (optional BCB RAG few-shot +
+local symbolic trace / control-flow report / approximate DFG skeleton; optional two-pass cloud).
 """
 
 import json
@@ -42,11 +42,11 @@ if str(_scripts_dir) not in sys.path:
     sys.path.insert(0, str(_scripts_dir))
 from bcb_rag import BCBRAGRetriever  # noqa: E402
 
-# Cloud: pass1 结构草稿（仅双次云时使用）
+# Cloud: pass1 structure draft (two-pass cloud only)
 CLONE_STRUCTURE_SYSTEM = (
     "You extract structural signals from Java code. Reply with one JSON object only, no markdown prose."
 )
-# Cloud: 最终裁决（可含 RAG few-shot + 多步报告）
+# Cloud: final verdict (may include RAG few-shot + multi-step reports)
 CLONE_ARBITER_SYSTEM = (
     "You are a Senior Java Static Analysis Expert for BigCloneBench Type-4 clones. "
     "Follow the user message exactly. End with one JSON object as specified."
@@ -83,17 +83,17 @@ def load_unixcoder_on_orchestrator(orchestrator: Orchestrator, config: dict) -> 
     allow_fallback = bool(uc.get("use_hf_pretrained_if_checkpoint_missing", True))
 
     if path.is_dir():
-        print(f"正在加载 UniXcoder 分类器（本地微调）: {path} ...")
+        print(f"Loading UniXcoder classifier (local finetune): {path} ...")
         orchestrator.code_tokenizer = RobertaTokenizer.from_pretrained(str(path))
         orchestrator.code_encoder = RobertaForSequenceClassification.from_pretrained(
             str(path)
         )
     elif allow_fallback:
         print(
-            f"警告: 未找到微调目录 {path}，将使用 HuggingFace 预训练权重 {fallback_id} "
-            f"（二分类头未在 BCB 上微调，指标仅供参考）。\n"
-            f"正式评估请先运行: python scripts/train_unixcoder_bcb.py export ... && train ...\n"
-            f"若需严格失败可设 clone_detection.unixcoder.use_hf_pretrained_if_checkpoint_missing: false"
+            f"Warning: finetune dir not found {path}, using HuggingFace pretrained {fallback_id} "
+            f"(binary head not trained on BCB; metrics are indicative only).\n"
+            f"For full eval run: python scripts/train_unixcoder_bcb.py export ... && train ...\n"
+            f"To fail hard set clone_detection.unixcoder.use_hf_pretrained_if_checkpoint_missing: false"
         )
         orchestrator.code_tokenizer = RobertaTokenizer.from_pretrained(fallback_id)
         orchestrator.code_encoder = RobertaForSequenceClassification.from_pretrained(
@@ -120,7 +120,7 @@ _QUALIFIED = re.compile(r"\b([A-Z][\w]*)\.(\w+)\s*\(")
 
 
 def local_symbolic_trace(java: str, max_items: int = 48) -> str:
-    """本地 Step1：API/方法调用骨架序列（Symbolic trace 近似）。"""
+    """Local step 1: API / method-call skeleton sequence (approximate symbolic trace)."""
     s = java or ""
     qual = [f"{a}.{b}" for a, b in _QUALIFIED.findall(s)]
     dots = list(_DOT_METHOD.findall(s))
@@ -136,7 +136,7 @@ def local_symbolic_trace(java: str, max_items: int = 48) -> str:
 
 
 def local_control_flow_report(c1: str, c2: str) -> str:
-    """本地 Step2：控制流关键词统计对比。"""
+    """Local step 2: control-flow keyword hit comparison."""
     keys = (
         "if",
         "else",
@@ -171,7 +171,7 @@ def _build_cloud_structure_prompt(
     dfg1: str,
     dfg2: str,
 ) -> str:
-    """云端 Step1+2（双次云）：由 LLM 产出符号迹与控制流对比 JSON。"""
+    """Cloud step 1+2 (two-pass): LLM produces symbolic traces and control-flow comparison JSON."""
     return f"""Extract structural signals for BigCloneBench clone analysis.
 
 ### Approximate data-flow skeletons (DFG-style; var -> call:A -> call:B)
@@ -208,7 +208,7 @@ def _build_agentic_arbitration_prompt(
     dfg2: str,
     llm_structure_json: Optional[str] = None,
 ) -> str:
-    """云端 Step3：结合 RAG Few-shot +（本地或云端）结构报告 + DFG 骨架，做最终裁决。"""
+    """Cloud step 3: final verdict with RAG few-shot + (local or cloud) structure + DFG skeleton."""
     mid = ""
     if llm_structure_json:
         mid = f"""
@@ -270,7 +270,7 @@ def _parse_is_clone(val: Any) -> bool:
 
 
 def _brace_match_end(s: str, start: int) -> int:
-    """从 s[start]=='{' 起，返回匹配的 '}' 下标；失败返回 -1。"""
+    """From s[start]=='{', return index of matching '}'; -1 on failure."""
     depth = 0
     i = start
     n = len(s)
@@ -301,14 +301,14 @@ def _brace_match_end(s: str, start: int) -> int:
 
 
 def _repair_json_loose(s: str) -> str:
-    """去掉尾随逗号等常见 LLM 笔误。"""
+    """Strip trailing commas and other common LLM JSON slips."""
     t = s.strip()
     t = re.sub(r",\s*([}\]])", r"\1", t)
     return t
 
 
 def _iter_json_candidates(text: str) -> List[str]:
-    """围栏块 + 从左到右每个顶层 {{ ... }} 平衡块。"""
+    """Fence blocks + balanced top-level { ... } chunks left to right."""
     out: List[str] = []
     if not text:
         return out
@@ -340,7 +340,7 @@ def _loads_dict_candidates(raw: str) -> Optional[dict]:
 
 
 def extract_json_from_text(text: str) -> dict:
-    """尽量解析出第一个合法 JSON 对象（任意键）。"""
+    """Parse the first valid JSON object (any keys)."""
     for cand in _iter_json_candidates(text):
         d = _loads_dict_candidates(cand)
         if d is not None:
@@ -350,8 +350,7 @@ def extract_json_from_text(text: str) -> dict:
 
 def extract_and_parse_json(text: str) -> dict:
     """
-    裁决用 JSON：优先含 is_clone 的候选；否则退而求其次含 thought_process；
-    再否则第一个合法 dict。
+    Verdict JSON: prefer dicts with is_clone; else thought_process; else first valid dict.
     """
     err = {"is_clone": False, "confidence": 0.0, "reason": "Parse Error"}
     if not text or not text.strip():
@@ -398,11 +397,11 @@ def load_dataset_data(dataset_name: str = "Clone-detection-BigCloneBench"):
         base_dir = Path(
             "datasets/CodeXGLUE/Code-Code/Clone-detection-BigCloneBench/dataset"
         )
-        print(f"正在加载 {dataset_name} 数据...")
+        print(f"Loading {dataset_name} data...")
         data_path = base_dir / "data.jsonl"
         code_dict: Dict[Any, str] = {}
         if data_path.exists():
-            print(f"加载代码数据: {data_path}")
+            print(f"Loading code from: {data_path}")
             with open(data_path, "r", encoding="utf-8") as f:
                 line_count = 0
                 for line in f:
@@ -415,9 +414,9 @@ def load_dataset_data(dataset_name: str = "Clone-detection-BigCloneBench"):
                             code_dict[int(idx)] = func
                         line_count += 1
                         if line_count % 50000 == 0:
-                            print(f"  已加载 {line_count} 条代码...")
+                            print(f"  loaded {line_count} code rows...")
         else:
-            print(f"警告: 数据文件不存在: {data_path}")
+            print(f"Warning: data file missing: {data_path}")
             return [], {}
 
         test_pairs = []
@@ -435,14 +434,14 @@ def load_dataset_data(dataset_name: str = "Clone-detection-BigCloneBench"):
                             except ValueError:
                                 continue
         else:
-            print(f"警告: 测试集文件不存在: {test_path}")
+            print(f"Warning: test file missing: {test_path}")
             return [], {}
 
-        print(f"{dataset_name} 加载完成：{len(test_pairs)} 对测试样本")
-        print(f"总代码片段数: {len(code_dict)}")
+        print(f"{dataset_name} loaded: {len(test_pairs)} test pairs")
+        print(f"Total code fragments: {len(code_dict)}")
         return test_pairs, code_dict
 
-    print(f"错误: 不支持的数据集: {dataset_name}")
+    print(f"Error: unsupported dataset: {dataset_name}")
     return [], {}
 
 
@@ -463,8 +462,8 @@ def encode_pair_symmetric_truncation(
     per_segment_cap: int = 254,
 ) -> Dict[str, Any]:
     """
-    对称截断：拼接 Code 与 DFG 后，分别 tokenize 并各取前 N 个子词。
-    格式: [CLS] Code A [SEP] DFG A [SEP] Code B [SEP] DFG B [SEP]
+    Symmetric truncation: concat Code+DFG per side, tokenize, take first N subwords each.
+    Layout: [CLS] Code A [SEP] DFG A [SEP] Code B [SEP] DFG B [SEP]
     """
     sep = getattr(tokenizer, "sep_token", "</s>")
     text1 = (code1 or "") + f" {sep} " + (dfg1 or "")
@@ -476,8 +475,8 @@ def encode_pair_symmetric_truncation(
     tokens2 = tokenizer.tokenize(text2)[:half]
     ids1 = tokenizer.convert_tokens_to_ids(tokens1)
     ids2 = tokenizer.convert_tokens_to_ids(tokens2)
-    # prepend_batch_axis=True：否则 input_ids 为 1D，RoBERTa forward 里
-    # batch_size, seq_length = input_shape 会报 ValueError: expected 2, got 1
+    # prepend_batch_axis=True: else input_ids is 1D and RoBERTa forward raises
+    # ValueError: expected 2, got 1 for batch_size, seq_length = input_shape
     return tokenizer.prepare_for_model(
         ids1,
         pair_ids=ids2,
@@ -600,10 +599,10 @@ async def analyze_pair(
         two_pass = bool(arb.get("agentic_two_pass", False))
         rounds_cloud_cost = cost_per_round * (2 if two_pass else 1)
 
-        print(f"  DEBUG pair {idx}: 灰区 ({low_p} < p < {high_p})，尝试 Cloud Arbiter")
+        print(f"  DEBUG pair {idx}: gray zone ({low_p} < p < {high_p}), trying Cloud Arbiter")
 
         if not await orchestrator.budget_controller.can_afford(rounds_cloud_cost):
-            print(f"  DEBUG pair {idx}: 预算不足，Edge 强制判决")
+            print(f"  DEBUG pair {idx}: budget insufficient, edge-forced decision")
             pred = 1 if clone_prob > 0.5 else 0
             conf = clone_prob if pred == 1 else 1.0 - clone_prob
             return {
@@ -780,11 +779,11 @@ async def main():
         type=str,
         default="Clone-detection-BigCloneBench",
         choices=["Clone-detection-BigCloneBench"],
-        help="要评估的数据集",
+        help="Dataset to evaluate",
     )
-    parser.add_argument("--sample", type=int, default=100, help="采样数量 (0=全部)")
-    parser.add_argument("--output", type=str, default=None, help="输出 CSV 路径")
-    parser.add_argument("--seed", type=int, default=42, help="随机种子")
+    parser.add_argument("--sample", type=int, default=100, help="Sample size (0=all)")
+    parser.add_argument("--output", type=str, default=None, help="Output CSV path")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -793,20 +792,20 @@ async def main():
     if args.output is None:
         args.output = f"results_{args.dataset.lower().replace('-', '_')}.csv"
 
-    print(f"=== UniXcoder + Cloud {args.dataset} 评估 ===")
-    print(f"采样数量: {args.sample if args.sample > 0 else '全部'}")
-    print(f"输出: {args.output}")
+    print(f"=== UniXcoder + Cloud {args.dataset} eval ===")
+    print(f"Sample size: {args.sample if args.sample > 0 else 'all'}")
+    print(f"Output: {args.output}")
 
     config = load_config_local("config/settings.yaml")
     apply_hf_cache_from_config(config)
     mc = config.get("models") or {}
     if mc.get("huggingface_cache"):
-        print(f"HuggingFace 缓存: {mc.get('huggingface_cache')}")
+        print(f"HuggingFace cache: {mc.get('huggingface_cache')}")
     ollama_dir = (config.get("ollama") or {}).get("models_dir")
     if ollama_dir:
         print(
-            f"提示: Ollama 权重环境变量 OLLAMA_MODELS={ollama_dir} "
-            "(主分析 CLI 使用；本脚本 Edge 侧为 UniXcoder)"
+            f"Note: Ollama model dir env OLLAMA_MODELS={ollama_dir} "
+            "(main analysis CLI; this script uses UniXcoder on the edge)"
         )
 
     test_pairs, code_dict = load_dataset_data(args.dataset)
@@ -819,9 +818,9 @@ async def main():
         selected_pairs = positive_pairs[:pos_count] + negative_pairs[:neg_count]
         random.shuffle(selected_pairs)
         test_pairs = selected_pairs[: args.sample]
-        print(f"采样后: {len(test_pairs)} 对 (正:{pos_count}, 负:{neg_count})")
+        print(f"After sampling: {len(test_pairs)} pairs (pos:{pos_count}, neg:{neg_count})")
     else:
-        print(f"全部 {len(test_pairs)} 对")
+        print(f"All {len(test_pairs)} pairs")
 
     y_true = []
     y_pred = []
@@ -839,10 +838,10 @@ async def main():
             orchestrator, config, bcb_root, seed=args.seed
         )
         if orchestrator.bcb_rag is not None:
-            print("BCB RAG：训练集索引已构建/加载，云端将带 Few-shot。")
+            print("BCB RAG: train index built/loaded; cloud will have few-shot examples.")
         else:
             print(
-                "BCB RAG：未启用或缺少 train.txt/data.jsonl，云端仅多步结构提示无检索示例。"
+                "BCB RAG: disabled or missing train.txt/data.jsonl; cloud uses structure prompts only (no retrieved examples)."
             )
         for i, (id1, id2, label) in enumerate(
             tqdm(test_pairs, desc="UniXcoder / Cloud")
@@ -851,7 +850,7 @@ async def main():
             code2 = code_dict.get(id2, "")
             if not code1 or not code2:
                 print(
-                    f"  WARNING: 代码为空 id1={id1}, id2={id2}, "
+                    f"  WARNING: empty code id1={id1}, id2={id2}, "
                     f"len1={len(code1)}, len2={len(code2)}"
                 )
 
@@ -909,8 +908,8 @@ async def main():
         print("\n" + "=" * 70)
         print(f"Evaluation Report (Seed={args.seed})")
         print("=" * 70)
-        print(f"数据集                  : {args.dataset}")
-        print(f"样本数量                : {len(y_true)}")
+        print(f"Dataset                 : {args.dataset}")
+        print(f"Samples                 : {len(y_true)}")
         print(f"Accuracy                : {accuracy:.4f}")
         print(f"Precision               : {precision:.4f}")
         print(f"Recall                  : {recall:.4f}")
@@ -925,7 +924,7 @@ async def main():
 
         df = pd.DataFrame(all_metrics)
         df.to_csv(args.output, index=False, encoding="utf-8")
-        print(f"详细结果已保存: {args.output}")
+        print(f"Detailed results written: {args.output}")
 
         summary = {
             "task": "clone_detection",
@@ -947,9 +946,9 @@ async def main():
         summary_file = f"{args.dataset.lower().replace('-', '_')}_summary.json"
         with open(summary_file, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2, ensure_ascii=False)
-        print(f"摘要已保存: {summary_file}")
+        print(f"Summary written: {summary_file}")
     else:
-        print("没有加载到测试数据")
+        print("No test data loaded")
 
 
 if __name__ == "__main__":

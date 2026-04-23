@@ -1,12 +1,12 @@
 """
-CSN 检索用「常见伪代码」查询增强：纯本地规则，无 API。
-将 Javadoc 式英文查询中与 Java 常见 API 相关的提示拼成短代码骨架，再与原文一并送入 UniXcoder 编码。
-同时提供 clean_java_query()：清洗 Javadoc 标签/HTML/句末冗余，提升 bi-encoder 查询质量。
+CSN retrieval: "pseudo-code" query augmentation with local rules only (no API).
+Append short Java-API-style stubs to Javadoc-style English queries and encode with the original in UniXcoder.
+Also provides clean_java_query(): strip Javadoc tags/HTML and trailing noise for bi-encoder quality.
 
-改进（v2）：
-- 规则表从 24 条扩至 ~60 条，补全集合/并发/IO/字符串/日期/数字等高频 Java 场景
-- 新增动词签名启发：从 NL 动词猜测 Java 方法签名骨架，追加 `// method: xxx` 注释
-- 新增 Java 类名检测：直接提取 NL 中 CamelCase 标识符作为 import 提示
+v2 changes:
+- Rules expanded to ~60 rows: collections, concurrency, I/O, strings, dates, numbers, etc.
+- Verb-signature heuristics: guess a Java method stub from NL verbs, append `// method: ...`
+- Detect CamelCase Java type names in NL as // classes: ... hints
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Tuple
 
-# ---- Javadoc / HTML 清洗 ----
+# ---- Javadoc / HTML cleanup ----
 
 _JAVADOC_TAG = re.compile(
     r"@(?:param|return|returns|throws|exception|see|since|deprecated|author|version|serial"
@@ -28,8 +28,8 @@ _MULTI_WS = re.compile(r"\s{2,}")
 
 def clean_java_query(text: str, max_chars: int = 300) -> str:
     """
-    去除 Javadoc @tag、HTML 标签、多余空白；截到 max_chars 保留核心语义句。
-    不改变 NL 词序，只做噪声剥离，适合在送入 bi-encoder 前调用。
+    Strip Javadoc @tags, HTML, extra whitespace; cap at max_chars for the main semantic sentence.
+    Preserves word order; noise removal only, call before the bi-encoder.
     """
     s = (text or "").strip()
     s = _JAVADOC_TAG.sub(" ", s)
@@ -43,8 +43,8 @@ def clean_java_query(text: str, max_chars: int = 300) -> str:
     return s if s else (text or "").strip()
 
 
-# ---- 规则表：(关键词子串组, 伪代码骨架) ----
-# 全部关键词均需出现在规范化查询中才附加，降低乱匹配率。
+# ---- Rules: (required keyword substrings, pseudo stub) ----
+# All substrings must appear in the normalized query before appending (reduces spurious matches).
 
 _RULES: List[Tuple[Tuple[str, ...], str]] = [
     # --- I/O ---
@@ -70,14 +70,14 @@ _RULES: List[Tuple[Tuple[str, ...], str]] = [
     (("channel", "buffer"), "FileChannel fc = FileChannel.open(path, READ); ByteBuffer bb = ByteBuffer.allocate(n);"),
     (("zip", "compress"), "ZipOutputStream zos = new ZipOutputStream(out); zos.putNextEntry(new ZipEntry(name));"),
     (("zip", "extract"), "ZipInputStream zis = new ZipInputStream(in); ZipEntry entry;"),
-    # --- 网络 ---
+    # --- Networking ---
     (("socket", "connect"), "Socket s = new Socket(host, port); InputStream is = s.getInputStream();"),
     (("url", "http"), "HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();"),
     (("http", "get"), "HttpClient client = HttpClient.newHttpClient(); HttpRequest req = HttpRequest.newBuilder().uri(URI.create(url)).GET().build();"),
     (("http", "post"), "HttpRequest req = HttpRequest.newBuilder().uri(uri).POST(HttpRequest.BodyPublishers.ofString(body)).build();"),
     (("http", "response"), "HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());"),
     (("server", "socket"), "ServerSocket ss = new ServerSocket(port); Socket client = ss.accept();"),
-    # --- 集合 ---
+    # --- Collections ---
     (("list", "element"), "List<T> list = new ArrayList<>(); list.add(e); for (T x : list) {}"),
     (("list", "sort"), "Collections.sort(list); // or list.sort(Comparator.naturalOrder())"),
     (("list", "sublist"), "List<T> sub = list.subList(fromIndex, toIndex);"),
@@ -97,7 +97,7 @@ _RULES: List[Tuple[Tuple[str, ...], str]] = [
     (("stream", "collect"), ".stream().filter(...).map(...).collect(Collectors.toList());"),
     (("stream", "group"), ".stream().collect(Collectors.groupingBy(T::getKey));"),
     (("optional", "present"), "Optional<T> opt = Optional.ofNullable(val); opt.ifPresent(v -> {}); opt.orElse(def);"),
-    # --- 字符串 ---
+    # --- Strings ---
     (("string", "split"), "String[] parts = str.split(regex); // or str.split(delim, limit)"),
     (("string", "join"), "String s = String.join(\", \", list); // or Collectors.joining(\", \")"),
     (("string", "format"), "String s = String.format(\"%s=%d\", key, val);"),
@@ -108,18 +108,18 @@ _RULES: List[Tuple[Tuple[str, ...], str]] = [
     (("string", "upper"), "str.toUpperCase(Locale.ROOT); str.toLowerCase(Locale.ROOT);"),
     (("charset", "encod"), "StandardCharsets.UTF_8; new String(bytes, UTF_8); str.getBytes(UTF_8);"),
     (("base64", "encod"), "Base64.getEncoder().encodeToString(bytes); Base64.getDecoder().decode(s);"),
-    # --- 数字 / 数学 ---
+    # --- Numbers / math ---
     (("number", "format"), "NumberFormat nf = NumberFormat.getInstance(); nf.format(num);"),
     (("integer", "parse"), "int n = Integer.parseInt(s); long l = Long.parseLong(s);"),
     (("double", "parse"), "double d = Double.parseDouble(s);"),
     (("math", "random"), "double r = Math.random(); // or ThreadLocalRandom.current().nextInt(n)"),
     (("big", "decimal"), "BigDecimal bd = new BigDecimal(\"1.23\"); bd.add(other).setScale(2, HALF_UP);"),
-    # --- 日期时间 ---
+    # --- Date/time ---
     (("date", "format"), "DateTimeFormatter fmt = DateTimeFormatter.ofPattern(\"yyyy-MM-dd\"); LocalDate.now().format(fmt);"),
     (("date", "parse"), "LocalDate d = LocalDate.parse(str, fmt); Instant i = Instant.parse(iso);"),
     (("timestamp", "current"), "Instant now = Instant.now(); long ms = System.currentTimeMillis();"),
     (("date", "compar"), "d1.isBefore(d2); d1.isAfter(d2); Duration.between(t1, t2).toMillis();"),
-    # --- 并发 ---
+    # --- Concurrency ---
     (("thread", "run"), "ExecutorService ex = Executors.newFixedThreadPool(n); ex.submit(() -> {});"),
     (("synchron", "lock"), "synchronized (lock) {} // or ReentrantLock lock = new ReentrantLock();"),
     (("concurrent", "map"), "ConcurrentHashMap<K,V> m = new ConcurrentHashMap<>(); m.computeIfAbsent(k, k2 -> new V());"),
@@ -129,42 +129,42 @@ _RULES: List[Tuple[Tuple[str, ...], str]] = [
     (("semaphore", "acquir"), "Semaphore sem = new Semaphore(permits); sem.acquire(); sem.release();"),
     (("thread", "sleep"), "Thread.sleep(millis); // or TimeUnit.SECONDS.sleep(n)"),
     (("volatile", "field"), "private volatile boolean running = true;"),
-    # --- 序列化 / JSON / XML ---
+    # --- Serialization / JSON / XML ---
     (("json", "parse"), "JsonParser.parseString(s).getAsJsonObject(); // or new JSONObject(s)"),
     (("json", "object"), "JsonObject obj = new JsonObject(); obj.addProperty(\"key\", val);"),
     (("xml", "parse"), "DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(in);"),
     (("xml", "element"), "Element e = doc.createElement(tag); e.setAttribute(attr, val); parent.appendChild(e);"),
     (("serial", "object"), "ObjectOutputStream oos = new ObjectOutputStream(out); oos.writeObject(obj);"),
     (("deserializ", "object"), "ObjectInputStream ois = new ObjectInputStream(in); T obj = (T) ois.readObject();"),
-    # --- 数据库 ---
+    # --- Database ---
     (("sql", "query"), "PreparedStatement ps = conn.prepareStatement(sql); ResultSet rs = ps.executeQuery();"),
     (("sql", "update"), "PreparedStatement ps = conn.prepareStatement(sql); ps.setString(1, val); ps.executeUpdate();"),
     (("transaction", "commit"), "conn.setAutoCommit(false); try { ...; conn.commit(); } catch (Exception e) { conn.rollback(); }"),
     (("result", "set"), "while (rs.next()) { String v = rs.getString(\"col\"); int n = rs.getInt(\"id\"); }"),
-    # --- 反射 ---
+    # --- Reflection ---
     (("reflect", "class"), "Class<?> c = Class.forName(name); Method m = c.getDeclaredMethod(methodName, paramTypes);"),
     (("reflect", "field"), "Field f = clazz.getDeclaredField(name); f.setAccessible(true); Object val = f.get(obj);"),
     (("reflect", "invoke"), "Method m = clazz.getMethod(name, paramTypes); Object result = m.invoke(instance, args);"),
-    # --- 加密 / 哈希 ---
+    # --- Crypto / hashing ---
     (("digest", "hash"), "MessageDigest md = MessageDigest.getInstance(\"SHA-256\"); byte[] h = md.digest(bytes);"),
     (("cipher", "encrypt"), "Cipher c = Cipher.getInstance(\"AES/CBC/PKCS5Padding\"); c.init(Cipher.ENCRYPT_MODE, key, iv); c.doFinal(data);"),
     (("hmac", "sign"), "Mac mac = Mac.getInstance(\"HmacSHA256\"); mac.init(secretKey); byte[] sig = mac.doFinal(data);"),
-    # --- 正则 ---
+    # --- Regex ---
     (("regex", "match"), "Pattern p = Pattern.compile(regex); Matcher m = p.matcher(text); m.find();"),
     (("regex", "replac"), "String s = text.replaceAll(regex, replacement);"),
     (("regex", "group"), "Matcher m = Pattern.compile(regex).matcher(s); if (m.matches()) { m.group(1); }"),
-    # --- 克隆 / 比较 ---
+    # --- Clone / compare ---
     (("clone", "object"), "protected Object clone() throws CloneNotSupportedException { return super.clone(); }"),
     (("comparable", "compar"), "public int compareTo(T other) { return Integer.compare(this.val, other.val); }"),
     (("comparator", "sort"), "list.sort(Comparator.comparing(T::getField).thenComparing(T::getOther));"),
-    # --- 缓冲 ---
+    # --- Buffers ---
     (("buffer", "byte"), "ByteBuffer buf = ByteBuffer.allocate(n); buf.put(b); buf.flip(); buf.get(arr);"),
     (("string", "builder"), "StringBuilder sb = new StringBuilder(); sb.append(s); sb.toString();"),
     (("string", "buffer"), "StringBuffer sb = new StringBuffer(); sb.append(s); // thread-safe"),
 ]
 
 
-# ---- 动词签名启发：从常见 Java 动词推断方法骨架 ----
+# ---- Verb heuristics: map common verbs to a method-signature hint ----
 
 _VERB_HINTS: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"\b(parse|deserializ)\b"), "// method: public T parse(String input)"),
@@ -199,10 +199,10 @@ _VERB_HINTS: List[Tuple[re.Pattern, str]] = [
     (re.compile(r"\b(unregister|unsubscrib|detach|unbind)\b"), "// method: public void unregister(Listener l)"),
 ]
 
-# Java CamelCase 类名检测：匹配 NL 中形如 InputStream / BufferedReader / HttpClient 的词
+# CamelCase Java types in NL, e.g. InputStream, BufferedReader, HttpClient
 _CAMEL_CLASS = re.compile(r"\b([A-Z][a-z]+(?:[A-Z][a-z]*)+)\b")
 
-# 已知 Java 关键字（过滤误匹配）
+# Filter obvious non-class capitalized words
 _NOT_CLASS = frozenset({
     "This", "The", "In", "If", "It", "For", "By", "An", "On",
     "As", "At", "Of", "To", "Or", "And", "With", "From", "When",
@@ -211,13 +211,13 @@ _NOT_CLASS = frozenset({
 
 
 def _extract_java_classes(nl: str) -> List[str]:
-    """从 NL 中提取 CamelCase Java 类/接口名（过滤普通英文首字母大写词）。"""
+    """Extract CamelCase Java class/interface names from NL (filter common English capitals)."""
     found = []
     for m in _CAMEL_CLASS.finditer(nl):
         name = m.group(1)
         if name not in _NOT_CLASS:
             found.append(name)
-    return list(dict.fromkeys(found))  # 去重保序
+    return list(dict.fromkeys(found))  # dedupe, preserve order
 
 
 def _normalize(q: str) -> str:
@@ -228,11 +228,11 @@ def _normalize(q: str) -> str:
 
 def build_pseudo_augmented_query(nl_query: str, max_extra_chars: int = 380) -> str:
     """
-    在原始 NL 后依次附加：
-    1. 规则命中的 Java API 伪代码骨架（_RULES）
-    2. 动词签名启发注释（_VERB_HINTS，最多 1 条避免冗余）
-    3. NL 中检测到的 Java 类名（// classes: Xxx, Yyy）
-    若无任何内容命中，返回原文。总额外字符不超过 max_extra_chars。
+    After the raw NL, append in order:
+    1) Rule-matched API stubs from _RULES
+    2) One verb-signature hint from _VERB_HINTS (at most one, avoid clutter)
+    3) Detected type names: // classes: A, B
+    If nothing matches, return the original. Total extra text capped at max_extra_chars.
     """
     raw = (nl_query or "").strip()
     if not raw:
@@ -242,14 +242,14 @@ def build_pseudo_augmented_query(nl_query: str, max_extra_chars: int = 380) -> s
     seen: set[str] = set()
     chunks: List[str] = []
 
-    # --- 规则伪代码 ---
+    # --- Rule stubs ---
     for keys, stub in _RULES:
         if all(k in norm for k in keys):
             if stub not in seen:
                 seen.add(stub)
                 chunks.append(stub)
 
-    # --- 动词签名（第一个匹配即止，避免堆叠） ---
+    # --- Verb hint (first match only) ---
     verb_hint: Optional[str] = None
     for pattern, hint in _VERB_HINTS:
         if pattern.search(norm):
@@ -258,7 +258,7 @@ def build_pseudo_augmented_query(nl_query: str, max_extra_chars: int = 380) -> s
     if verb_hint:
         chunks.append(verb_hint)
 
-    # --- Java 类名提示 ---
+    # --- Java class hints ---
     java_classes = _extract_java_classes(raw)
     if java_classes:
         chunks.append("// classes: " + ", ".join(java_classes[:5]))

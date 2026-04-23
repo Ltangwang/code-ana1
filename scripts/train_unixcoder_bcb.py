@@ -2,14 +2,14 @@
 """
 Fine-tune microsoft/unixcoder-base as a binary clone classifier (BigCloneBench-style pairs).
 
-独立脚本：evaluate_*.py 不会执行本训练；仅在需要更新 BCB 分类器时手动运行 export/train。
+Standalone: evaluate_*.py does not run this; run export/train manually when updating the BCB classifier.
 
-权重缓存：可通过 HF_HOME / HF_HUB_CACHE 或 config/settings.yaml 中 models.huggingface_cache 指定。
+Weight cache: set HF_HOME / HF_HUB_CACHE or config settings.yaml `models.huggingface_cache`.
 
-数据格式（JSONL 每行）：
+Data format (one JSONL object per line):
   {"code1": "...", "code2": "...", "dfg1": "...", "dfg2": "...", "label": 0|1}
 
-从 CodeXGLUE BCB 目录导出：
+Export from CodeXGLUE BCB root:
   python scripts/train_unixcoder_bcb.py export --bcb-root datasets/.../dataset
   python scripts/train_unixcoder_bcb.py train --train-jsonl data/bcb_train.jsonl --valid-jsonl data/bcb_valid.jsonl
 """
@@ -298,14 +298,14 @@ def main() -> None:
         "--final-model-dir",
         type=str,
         default=str(_ROOT / "models/unixcoder-bcb-best"),
-        help="最终保存的 model + tokenizer（可改为与 clone_detection.unixcoder.model_path 一致）",
+        help="Final model + tokenizer output dir (align with clone_detection.unixcoder.model_path if needed)",
     )
     pt.add_argument("--base-model", type=str, default="microsoft/unixcoder-base")
     pt.add_argument(
         "--hf-cache",
         type=str,
         default=default_cache,
-        help="HF 缓存目录（默认读 config 或留空使用环境变量）",
+        help="HF cache dir (default from config or env if empty)",
     )
     pt.add_argument("--max-length", type=int, default=512)
     pt.add_argument("--batch-size", type=int, default=16)

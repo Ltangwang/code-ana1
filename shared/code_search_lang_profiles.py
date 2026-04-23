@@ -1,6 +1,6 @@
 """
-CodeSearchNet 非 Java 评测用语言配置（与 evaluate_code_search_non_java.py 配套）。
-lang_id 与 CodeSearchNet_clean_Dataset 下子目录名一致。
+Per-language config for non-Java CodeSearchNet eval (used with evaluate_code_search_non_java.py).
+lang_id matches subdirs under CodeSearchNet_clean_Dataset.
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class CodeSearchLangProfile:
-    """一种语言的 prompt / 代码围栏配置。"""
+    """Prompt and code-fence settings for one language."""
 
     lang_id: str
     code_fence: str
@@ -30,7 +30,7 @@ def _p(
     engineer: str,
     method_unit: str,
 ) -> CodeSearchLangProfile:
-    """生成各语言同质结构的 prompt（与 Java 版 evaluate 对齐，仅术语替换）。"""
+    """Build structurally similar prompts for each language (aligned with Java eval, terms only differ)."""
     rerank_system = f"""You are an expert Software Engineer and an intelligent Code Search Assistant.
 Your task is to find the most relevant {display_name} code snippet for a given natural language query.
 The dataset is CodeSearchNet, where queries are typically {doc_phrase}.

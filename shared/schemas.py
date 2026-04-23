@@ -96,7 +96,7 @@ class AnalysisDraft(BaseModel):
     
     class Config:
         """Pydantic configuration."""
-        protected_namespaces = ()  # 允许使用 model_name 字段
+        protected_namespaces = ()  # allow a field named model_name
     
     def needs_cloud_verification(self, threshold: float = 0.6) -> bool:
         """Determine if this draft needs cloud verification."""

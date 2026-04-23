@@ -19,7 +19,7 @@ _java = default_csn_java_dir()
 _test_path = _java / "test.jsonl"
 if not _test_path.is_file():
     raise FileNotFoundError(
-        f"未找到 {_test_path}，请先运行 download_codesearchnet.py（或设置 CSN_OUTPUT_DIR）"
+        f"Not found: {_test_path}; run download_codesearchnet.py (or set CSN_OUTPUT_DIR) first."
     )
 
 test = load_csn_dataset(_test_path, 1000)
@@ -28,7 +28,7 @@ _cache_dir = default_eval_models_parent(None) / "1"
 _npzs = sorted(_cache_dir.glob("csn_retriever_emb_*.npz"), key=lambda p: p.stat().st_mtime)
 if not _npzs:
     raise FileNotFoundError(
-        f"未在 {_cache_dir} 找到 csn_retriever_emb_*.npz，请先运行 scripts/evaluate_code_search.py 生成索引缓存"
+        f"No csn_retriever_emb_*.npz under {_cache_dir}; run scripts/evaluate_code_search.py to build index cache first."
     )
 data = np.load(_npzs[-1])
 embs = data["embeddings"]

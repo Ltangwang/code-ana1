@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-PHP 清洗版 CodeSearchNet 微调入口（UniXcoder 双塔，超参与 train_unixcoder_csn.py 一致）。
+PHP cleaned CodeSearchNet finetune (UniXcoder bi-encoder; same hyperparams as train_unixcoder_csn.py).
 
-- 默认 --output-dir 为 shared.csn_paths.default_unixcoder_csn_php_output_dir()（与
-  evaluate_code_search_php.py 注入的 CODE_SEARCH_UNIXCODER_PHP_PATH、以及 config 中
-  code_search.unixcoder_model_path_php 应对齐为同一物理目录）。
-- 默认 train：CodeSearchNet_clean_Dataset/php/train.jsonl（全量；--train-max-samples 默认 0=不限制）。
-- 默认验证：从 train 中随机划出 3%（--valid-split-ratio 0.03，seed 固定），
-  与 Go/JavaScript 清洗版一致：勿用 test 做训练/验证以免评测泄漏。
-- 不启用 Python 专用的 code 去 docstring。
+- Default --output-dir: shared.csn_paths.default_unixcoder_csn_php_output_dir() (align with
+  CODE_SEARCH_UNIXCODER_PHP_PATH from evaluate_code_search_php.py and code_search.unixcoder_model_path_php).
+- Default train: CodeSearchNet_clean_Dataset/php/train.jsonl (full; --train-max-samples 0 = no cap).
+- Default validation: 3% random from train (--valid-split-ratio 0.03, fixed seed),
+  same as Go/JavaScript cleaned; do not use test for train/val to avoid eval leakage.
+- Does not enable Python-only code docstring stripping.
 
-用法：
+Usage:
 
   python scripts/train_unixcoder_csn_php.py
 

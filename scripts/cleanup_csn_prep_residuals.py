@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-清理 CodeSearchNet / GraphCodeBERT 准备阶段产生的「非 Java」缓存与中间目录，释放磁盘。
-**不删除** `java/` 及其中的 jsonl。
+Remove non-Java prep artifacts for CodeSearchNet / GraphCodeBERT to free disk space.
+**Does not** delete `java/` or its jsonl.
 
-默认处理两个根（均可通过环境变量改路径，与 csn_paths 一致）：
+Two default roots (override via env, same as csn_paths):
 
-1) 清洗根（CSN_CLEAN_OUTPUT_DIR 或 仓库/CodeSearchNet_clean_Dataset/）
-   - 顶层非 Java 语言目录：python, php, go, ruby, javascript, js
-   - 若存在 dataset/，其下非 Java 子目录
-   - _vendor/CodeBERT/GraphCodeBERT/codesearch/dataset/ 下非 Java 语言目录（php/final 等大文件常在此）
-   - codesearch 目录内明显的非 Java 语料 .zip（不含 java.zip）
+1) Cleaned root (CSN_CLEAN_OUTPUT_DIR or repo/CodeSearchNet_clean_Dataset/)
+   - Top-level non-Java language dirs: python, php, go, ruby, javascript, js
+   - If `dataset/` exists, non-Java subdirs under it
+   - Under _vendor/CodeBERT/GraphCodeBERT/codesearch/dataset/ non-Java lang dirs (e.g. php/final)
+   - Obvious non-Java corpus .zip under codesearch (excluding java.zip)
 
-2) 可选：HF 导出根（--include-hf-export）
-   - CodeSearchNet_Dataset/（或 CSN_OUTPUT_DIR）下非 Java 语言子目录
+2) Optional HF export (--include-hf-export)
+   - Non-Java subdirs under CodeSearchNet_Dataset/ (or CSN_OUTPUT_DIR)
 
-用法：
-  python scripts/cleanup_csn_prep_residuals.py --dry-run   # 先看将删什么
-  python scripts/cleanup_csn_prep_residuals.py               # 执行删除
+Usage:
+  python scripts/cleanup_csn_prep_residuals.py --dry-run   # list what would be removed
+  python scripts/cleanup_csn_prep_residuals.py               # delete
   python scripts/cleanup_csn_prep_residuals.py --include-hf-export
 """
 from __future__ import annotations
@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -34,7 +35,7 @@ from shared.csn_paths import default_csn_clean_dataset_root, default_csn_dataset
 
 _NON_JAVA = frozenset({"python", "php", "go", "ruby", "javascript", "js"})
 
-# codesearch 目录下常见语料包文件名（不含 java）
+# Common corpus zip names under codesearch (excluding java)
 _NON_JAVA_ZIP = re.compile(
     r"(?:^|[-_/])(?:python|php|go|ruby|javascript)\.zip$",
     re.IGNORECASE,
@@ -111,28 +112,28 @@ def _unique_paths(paths: list[Path]) -> list[Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="清理 CSN 准备阶段非 Java 缓存（保留 java/）"
+        description="Clean non-Java CSN prep caches (keeps java/)"
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="仅列出将删除的路径，不执行删除",
+        help="List paths only, do not delete",
     )
     parser.add_argument(
         "--clean-root",
         type=str,
         default=None,
-        help="清洗数据根（默认 CSN_CLEAN_OUTPUT_DIR 或 仓库/CodeSearchNet_clean_Dataset）",
+        help="Cleaned data root (default CSN_CLEAN_OUTPUT_DIR or repo/CodeSearchNet_clean_Dataset)",
     )
     parser.add_argument(
         "--include-hf-export",
         action="store_true",
-        help="同时删除 CodeSearchNet_Dataset/（或 CSN_OUTPUT_DIR）下非 Java 语言目录",
+        help="Also remove non-Java dirs under CodeSearchNet_Dataset/ (or CSN_OUTPUT_DIR)",
     )
     parser.add_argument(
         "--remove-vendor",
         action="store_true",
-        help="额外删除整个 _vendor/（含 CodeBERT 克隆；java 成品若在 java/ 则不受影响）",
+        help="Also remove entire _vendor/ (CodeBERT clone; java under java/ is unchanged)",
     )
     args = parser.parse_args()
 
@@ -151,16 +152,16 @@ def main() -> None:
 
     if not targets:
         print(
-            f"未发现可清理的非 Java 项。\n"
-            f"  清洗根: {clean_root}\n"
-            f"  可加 --include-hf-export 或确认是否已有 _vendor/…/dataset/php 等目录。"
+            f"Nothing to clean (non-Java).\n"
+            f"  clean_root: {clean_root}\n"
+            f"  try --include-hf-export or check for _vendor/.../dataset/php etc."
         )
         return
 
-    print(f"清洗根: {clean_root}")
-    print(f"将处理 {len(targets)} 个路径（不触碰 java/）：\n")
+    print(f"clean_root: {clean_root}")
+    print(f"Will process {len(targets)} path(s) (java/ untouched):\n")
     for p in targets:
-        print(f"{'[dry-run] ' if args.dry_run else ''}删除: {p}")
+        print(f"{'[dry-run] ' if args.dry_run else ''}remove: {p}")
         if not args.dry_run:
             if p.is_dir():
                 shutil.rmtree(p, ignore_errors=True)
@@ -168,10 +169,10 @@ def main() -> None:
                 try:
                     p.unlink()
                 except OSError as e:
-                    print(f"  警告: 无法删除文件 {p}: {e}")
+                    print(f"  warning: could not delete file {p}: {e}")
 
     if not args.dry_run:
-        print("\n清理完成。java/ 目录未删除。")
+        print("\nCleanup done. java/ was not removed.")
 
 
 if __name__ == "__main__":

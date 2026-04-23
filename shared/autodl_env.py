@@ -1,9 +1,9 @@
 """
-AutoDL：把 HF / PyTorch 等缓存指到数据盘。
+AutoDL: point HuggingFace / PyTorch caches at the data disk.
 
-优先 /root/autodl-fs（大容量数据盘），否则 /root/autodl-tmp。
-在 import transformers 之前调用 apply_autodl_data_disk_env() 效果更佳。
-环境变量 AUTODL_DATA_ROOT 可覆盖数据盘根路径。
+Prefer /root/autodl-fs (large data volume), else /root/autodl-tmp.
+Call apply_autodl_data_disk_env() before import transformers for best effect.
+Set AUTODL_DATA_ROOT to override the data root.
 """
 
 from __future__ import annotations

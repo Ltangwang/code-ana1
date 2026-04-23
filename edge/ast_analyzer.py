@@ -347,17 +347,17 @@ class ASTAnalyzer:
         return min(score, 1.0)
 
     def _remove_java_comments(self, code: str) -> str:
-        """移除 Java 代码中的块注释和行注释，减少噪音干扰"""
+        """Remove block and line comments from Java to reduce noise."""
         if not code:
             return ""
-        # 移除多行注释 /* ... */
+        # Remove block comments /* ... */
         code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
-        # 移除单行注释 // ...
+        # Remove line comments // ...
         code = re.sub(r'//.*', '', code)
         return code
 
     def _get_java_tree_sitter_parser(self):
-        """懒加载 tree-sitter-java Parser（失败则返回 None，走词法回退）。"""
+        """Lazy-load tree-sitter-java Parser; None on failure (lexical fallback)."""
         cache_attr = "_java_ts_parser"
         if getattr(self, cache_attr, None) is not None:
             return getattr(self, cache_attr)
@@ -402,7 +402,7 @@ class ASTAnalyzer:
         return 1.0 - (dist / denom) if denom else 1.0
 
     def _preorder_java_node_types(self, root: Any, max_nodes: int) -> Tuple[List[str], int]:
-        """前序遍历收集节点类型序列；返回 (types, max_depth)。"""
+        """Preorder traversal of node types; returns (types, max_depth)."""
         if root is None:
             return [], 0
         types: List[str] = []
@@ -424,7 +424,7 @@ class ASTAnalyzer:
     ) -> Optional[Tuple[float, int, int, int, float]]:
         """
         Java AST node-type sequence: SequenceMatcher + Jaccard + Levenshtein (normalized).
-        返回 (融合分, n1, n2, max_depth, lev_sim) 或 None。
+        Returns (fused score, n1, n2, max_depth, lev_sim) or None.
         """
         parser = self._get_java_tree_sitter_parser()
         if parser is None:
@@ -470,7 +470,7 @@ class ASTAnalyzer:
         return (score, len(r1), len(r2), max(d1, d2), lev_sim)
 
     def _lexical_java_similarity(self, c1: str, c2: str) -> float:
-        """词法 + API 重叠相似度（原正则管线，作 Tree-sitter 不可用时的回退）。"""
+        """Lexical + API overlap similarity (regex path when tree-sitter unavailable)."""
         if len(c1) < 5 or len(c2) < 5:
             return 0.0
 
@@ -603,7 +603,7 @@ class ASTAnalyzer:
 
     def calculate_code_similarity(self, code1: str, code2: str) -> Dict[str, Any]:
         """
-        Java 克隆结构相似度：优先 Tree-sitter 节点类型序列 + 词法/API 融合；失败时回退词法管线。
+        Java clone structural similarity: tree-sitter node-type + lexical/API fusion; fallback to lexical.
 
         Returns:
             dict: score, lexical_score, tree_sitter_score, tree_sitter_used, complexity, ...

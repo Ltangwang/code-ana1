@@ -1,9 +1,9 @@
 """
-CodeSearchNet 数据目录与评测/训练用模型缓存根路径。
-- 原始 HF 导出：默认 /root/autodl-fs/CodeSearchNet_Dataset（CSN_OUTPUT_DIR 可覆盖）。
-- GraphCodeBERT 过滤版：若仓库根下存在 CodeSearchNet_clean_Dataset/ 则优先用之；否则默认
-  /root/autodl-fs/CodeSearchNet_clean_Dataset（CSN_CLEAN_OUTPUT_DIR 始终优先覆盖）。
-- 父目录可用 CSN_DATA_PARENT 统一覆盖（默认 /root/autodl-fs）。
+CodeSearchNet data dirs and default model/cache roots for eval and training.
+- Raw HF export: default /root/autodl-fs/CodeSearchNet_Dataset (overridable via CSN_OUTPUT_DIR).
+- GraphCodeBERT filtered: if CodeSearchNet_clean_Dataset/ exists at repo root it wins; else default
+  /root/autodl-fs/CodeSearchNet_clean_Dataset (CSN_CLEAN_OUTPUT_DIR always overrides when set).
+- Parent dir can be set with CSN_DATA_PARENT (default /root/autodl-fs).
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def repo_root() -> Path:
 
 
 def default_csn_data_parent() -> Path:
-    """CodeSearchNet 原始/清洗数据集的默认父目录（无单独 OUTPUT 环境变量时）。"""
+    """Default parent for raw / cleaned CodeSearchNet (when no per-dataset OUTPUT env is set)."""
     env = os.environ.get("CSN_DATA_PARENT", "").strip()
     if env:
         return Path(env).expanduser().resolve()
@@ -53,8 +53,8 @@ def default_csn_clean_dataset_root() -> Path:
 
 def _csn_test_jsonl_has_loadable_query(java_dir: Path, max_lines: int = 3000) -> bool:
     """
-    与 scripts.csn_data.load_csn_dataset(require_code=False) 一致：
-    至少一行含 NL，且含 url 或 code（清洗版 test 常无 code，仅用 url 对齐 codebase）。
+    Same as scripts.csn_data.load_csn_dataset(require_code=False):
+    at least one line with NL and url or code (cleaned test often has no code, url-only for codebase join).
     """
     p = java_dir / "test.jsonl"
     if not p.is_file():
@@ -91,7 +91,7 @@ def _csn_test_jsonl_has_loadable_query(java_dir: Path, max_lines: int = 3000) ->
 
 
 def _autodl_sibling_java_dirs(*relative: str) -> list[Path]:
-    """在数据盘下尝试常见仓库目录名，减轻 code-anal / code-ana1 / code-analyze 混用导致读空数据。"""
+    """Try common repo dir names on the data disk to avoid empty reads from code-anal / code-ana1 / code-analyze mix-ups."""
     if not AUTODL_DATA_ROOT.is_dir():
         return []
     rel = Path(*relative)
@@ -103,10 +103,11 @@ def _autodl_sibling_java_dirs(*relative: str) -> list[Path]:
 
 def default_csn_java_dir_for_code_search() -> Path:
     """
-    代码检索评估用 Java 数据目录：优先清洗版（含 test.jsonl），否则回退到原始目录。
-    强制路径：环境变量 CSN_JAVA_DIR。
-    在 AutoDL 上还会在 AUTODL_DATA_ROOT 下尝试 code-ana1、code-anal、code-analyze 中的同名数据集目录。
-    若某目录仅有 test.jsonl 但为空或无法解析出查询，会跳过并尝试下一候选（例如数据在 code-ana1 而代码在 code-anal）。
+    Java data dir for code search eval: prefer cleaned (with test.jsonl), else raw.
+    Override: CSN_JAVA_DIR.
+    On AutoDL, also try same dataset dirs under AUTODL_DATA_ROOT for code-ana1, code-anal, code-analyze.
+    If a dir has only test.jsonl that is empty or yields no query, skip and try the next
+    (e.g. data in code-ana1 but code in code-anal).
     """
     env = os.environ.get("CSN_JAVA_DIR", "").strip()
     if env:
@@ -130,7 +131,7 @@ def default_csn_java_dir_for_code_search() -> Path:
 
 
 def default_csn_validation_jsonl(java_dir: Path | None = None) -> Path:
-    """HuggingFace 导出多为 validation.jsonl；若仅有 valid.jsonl 则使用之。"""
+    """HF export usually uses validation.jsonl; if only valid.jsonl exists, use that."""
     base = java_dir if java_dir is not None else default_csn_java_dir()
     for name in ("validation.jsonl", "valid.jsonl"):
         p = base / name
@@ -140,7 +141,7 @@ def default_csn_validation_jsonl(java_dir: Path | None = None) -> Path:
 
 
 def default_eval_models_parent(config: dict | None) -> Path:
-    """检索嵌入等缓存的父目录（其下常用子目录如 1/）。"""
+    """Parent for retrieval embedding caches (often subdirs like 1/)."""
     env = os.environ.get("CSN_EVAL_MODELS_ROOT", "").strip()
     if env:
         return Path(env).expanduser().resolve()
@@ -160,12 +161,12 @@ def code_search_eval_results_dir(
     cli_override: str | None = None,
 ) -> Path:
     """
-    评测产物目录：results_code_search.json、CSV、LLM 重排磁盘缓存。
+    Where eval writes: results_code_search.json, CSV, LLM rerank disk cache.
 
-    优先级：CLI --results-dir > settings.yaml code_search_eval.results_output（非空）
-    > 默认与嵌入缓存同逻辑下的 code_search_eval/（如 AutoDL 数据盘 models/code_search_eval）。
+    Precedence: CLI --results-dir > settings.yaml code_search_eval.results_output (if non-empty)
+    > default code_search_eval/ next to embed cache (e.g. AutoDL data disk models/code_search_eval).
 
-    results_output 为相对路径时相对于仓库根（CODE-ANA1 / 项目根）。
+    If results_output is relative, it is relative to repo root (CODE-ANA1 / project root).
     """
     if cli_override and str(cli_override).strip():
         p = Path(str(cli_override).strip()).expanduser()
@@ -190,7 +191,7 @@ def code_search_eval_results_dir(
 
 
 def default_hf_cache_for_training() -> Path:
-    """训练脚本 HF 缓存目录（数据盘优先）。"""
+    """HF cache for training scripts (data disk preferred)."""
     h = os.environ.get("HF_HOME", "").strip()
     if h:
         return Path(h)
@@ -200,30 +201,30 @@ def default_hf_cache_for_training() -> Path:
 
 
 def default_unixcoder_csn_output_dir() -> Path:
-    """Java CSN 微调默认输出目录（勿与 Python 共用）。"""
+    """Default Java CSN finetune output (do not share with Python)."""
     return default_eval_models_parent(None) / "unixcoder-csn-java"
 
 
 def default_unixcoder_csn_python_output_dir() -> Path:
-    """Python CSN 微调默认输出目录；与 Java 分离，避免覆盖 unixcoder-csn-java。"""
+    """Default Python CSN finetune output; separate from Java to avoid clobbering unixcoder-csn-java."""
     return default_eval_models_parent(None) / "unixcoder-csn-python"
 
 
 def default_unixcoder_csn_go_output_dir() -> Path:
-    """Go（清洗版）CSN 微调默认输出目录；与 Java/Python 分离。"""
+    """Default Go (cleaned) CSN finetune output; separate from Java/Python."""
     return default_eval_models_parent(None) / "unixcoder-csn-go"
 
 
 def default_unixcoder_csn_javascript_output_dir() -> Path:
-    """JavaScript（清洗版）CSN 微调默认输出目录；与其它语言分离。"""
+    """Default JavaScript (cleaned) CSN finetune output; separate from other languages."""
     return default_eval_models_parent(None) / "unixcoder-csn-javascript"
 
 
 def default_unixcoder_csn_php_output_dir() -> Path:
-    """PHP（清洗版）CSN 微调默认输出目录；与其它语言分离。"""
+    """Default PHP (cleaned) CSN finetune output; separate from other languages."""
     return default_eval_models_parent(None) / "unixcoder-csn-php"
 
 
 def default_unixcoder_csn_ruby_output_dir() -> Path:
-    """Ruby（清洗版）CSN 微调默认输出目录；与其它语言分离。"""
+    """Default Ruby (cleaned) CSN finetune output; separate from other languages."""
     return default_eval_models_parent(None) / "unixcoder-csn-ruby"

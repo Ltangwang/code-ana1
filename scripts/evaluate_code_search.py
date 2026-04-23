@@ -88,7 +88,7 @@ Evaluation Criteria:
 """
 
 def _build_rerank_prompt(query: str, candidates: List[Dict[str, Any]]) -> str:
-    """云端重排：候选 code 全文写入 prompt（不截断）；超长时总 token 可能触云厂商上限。"""
+    """Cloud rerank: full candidate code in the prompt (not truncated); very long inputs may hit provider token limits."""
     prompt = f"## User Search Query\n\"{query}\"\n\n## Candidate Code Snippets\n"
     for i, cand in enumerate(candidates):
         code = cand.get("code", "") or ""
@@ -169,7 +169,7 @@ def _llm_stage_rank(
     ground_truth_url: str,
     gt_rank_in_pool: int,
 ) -> int:
-    """GT 在 pool 中的 0-based 名次。GT 不在 pool 时须返回 -1，勿伪造成名次 1（见 non_java 同函数注释）。"""
+    """0-based rank of GT in the pool. If GT is not in the pool, return -1; do not fake rank 1 (see same function in non_java)."""
     n = len(pool)
     if gt_rank_in_pool < 0 or gt_rank_in_pool >= n:
         return -1
@@ -189,7 +189,7 @@ def _refined_search_query_from_parsed(parsed: dict) -> str:
 
 
 def _valid_best_candidate_index(parsed: dict, pool_len: int) -> Optional[int]:
-    """若 JSON 中含合法下标则返回，否则视为 Ollama/模型输出不可用。"""
+    """Return a valid index from JSON if present; otherwise treat Ollama/model output as unusable."""
     if "best_candidate_index" not in parsed:
         return None
     v: Any = parsed["best_candidate_index"]
@@ -205,7 +205,7 @@ def _valid_best_candidate_index(parsed: dict, pool_len: int) -> Optional[int]:
 
 
 def _json_truthy(d: dict, *keys: str) -> bool:
-    """needs_escalation / uncertain 等为真时请求上云复核。"""
+    """If needs_escalation / uncertain (etc.) is true, request cloud re-check."""
     for k in keys:
         if k not in d:
             continue
@@ -310,18 +310,18 @@ def load_unixcoder_base(orchestrator: Orchestrator, config: dict) -> None:
     fallback = uc.get("fallback_pretrained", "microsoft/unixcoder-base")
     model_name = str(fallback).strip() or "microsoft/unixcoder-base"
     raw_mp = (uc.get("model_path") or "").strip()
-    print(f"[UniXcoder] 配置 clone_detection.unixcoder.model_path: {raw_mp or '(未设置)'}")
+    print(f"[UniXcoder] config clone_detection.unixcoder.model_path: {raw_mp or '(not set)'}")
     if raw_mp:
         p = Path(raw_mp).expanduser()
         if p.exists():
             model_name = str(p.resolve())
-            print(f"[UniXcoder] 微调权重实际读入路径（本地目录）: {model_name}")
+            print(f"[UniXcoder] fine-tune weights loaded from (local dir): {model_name}")
         else:
             print(
-                f"[UniXcoder] 警告: model_path 路径不存在，回退到 fallback_pretrained: {model_name}"
+                f"[UniXcoder] warning: model_path does not exist, using fallback_pretrained: {model_name}"
             )
     else:
-        print(f"[UniXcoder] 未配置 model_path，使用 fallback_pretrained: {model_name}")
+        print(f"[UniXcoder] model_path not set, using fallback_pretrained: {model_name}")
 
     print(f"Loading UniXcoder Base Model: {model_name} ...")
     orchestrator.code_tokenizer = RobertaTokenizer.from_pretrained(model_name)
@@ -338,7 +338,7 @@ def load_unixcoder_base(orchestrator: Orchestrator, config: dict) -> None:
 def _chunk_indexed_evenly(
     indexed: List[Tuple[int, Dict[str, Any]]], num_parts: int
 ) -> List[List[Tuple[int, Dict[str, Any]]]]:
-    """将 (全局下标, 样本) 列表均分为 num_parts 段；段数上限为样本数。"""
+    """Split a list of (global index, sample) into num_parts chunks; at most as many parts as samples."""
     n = len(indexed)
     if n == 0:
         return []
@@ -384,14 +384,14 @@ async def _no_edge_cloud_rescue(
     search_lock: Optional[asyncio.Lock],
 ) -> Dict[str, Any]:
     """
-    首段 retrieve_k 内无 GT：视为第一次检索失败，由云端主导「重做」该 query（不调 Ollama/CE）。
+    If GT is not in the first retrieve_k results, treat the first retrieval as failed; the cloud leads a "redo" of the query (no Ollama/CE).
 
-    默认（cloud_rescue_refine=True）：
-      1) 云端根据原 query 生成 refined_search_query（第二次检索用语）；
-      2) 本地双塔仅用该字符串从全库召回 top cloud_rescue_k 候选（构成候选池）；
-      3) 云端在候选池上输出 best_candidate_index（最终选定谁，不是沿用双塔顺序）。
+    Default (cloud_rescue_refine=True):
+      1) Cloud produces refined_search_query from the original query (text for the second retrieval);
+      2) Local bi-encoder uses only that string to recall top cloud_rescue_k candidates from the full index (the pool);
+      3) Cloud outputs best_candidate_index on that pool (final pick, not the bi-encoder order).
 
-    若关闭 refine（--no-cloud-rescue-refine）：跳过步骤 1，仍用原 query 召回候选池，仅步骤 3 由云重排。
+    If refine is off (--no-cloud-rescue-refine): skip step 1, still build the pool with the original query; only step 3 is cloud rerank.
     """
     rescue_k = max(int(pl.get("cloud_rescue_k", 50)), int(pl.get("retrieve_k", 10)))
     use_refine = bool(pl.get("cloud_rescue_refine", True))
@@ -441,7 +441,7 @@ async def _no_edge_cloud_rescue(
                 details=f"query={idx}",
             )
         except Exception as e:
-            print(f"  analyze_query {idx} no_edge 云端改写 query 调用失败，回退原 query: {e}")
+            print(f"  analyze_query {idx} no_edge cloud query-refine call failed, using original query: {e}")
             search_query_for_pool = nl_query
 
     def _run_rescue_pool() -> List[Dict[str, Any]]:
@@ -471,7 +471,7 @@ async def _no_edge_cloud_rescue(
         parsed = extract_json_from_text(content)
         best_c = _valid_best_candidate_index(parsed, len(rescue_pool))
         if best_c is None:
-            print(f"  analyze_query {idx}: no_edge 解救云返回无有效 best_candidate_index")
+            print(f"  analyze_query {idx}: no_edge rescue cloud returned no valid best_candidate_index")
             cloud_fallback_reason = "no_edge_rescue_cloud_invalid_parse"
             cloud_verified = False
         else:
@@ -633,7 +633,7 @@ async def analyze_query(
                 timeout_sec=ollama_deep_timeout,
             )
             if not (ollama_text and ollama_text.strip()):
-                print(f"  analyze_query {idx}: Ollama 空响应，触发云端重排")
+                print(f"  analyze_query {idx}: Ollama empty response, triggering cloud rerank")
                 pre_cloud_trigger = "ollama_empty_response"
             else:
                 op = extract_json_from_text(ollama_text)
@@ -647,7 +647,7 @@ async def analyze_query(
                         )
                         ollama_verified = True
                     print(
-                        f"  analyze_query {idx}: Ollama needs_escalation=true，触发云端重排"
+                        f"  analyze_query {idx}: Ollama needs_escalation=true, triggering cloud rerank"
                     )
                 elif best_o is not None:
                     ollama_rank = _llm_stage_rank(
@@ -659,10 +659,10 @@ async def analyze_query(
                 else:
                     pre_cloud_trigger = "ollama_invalid_index"
                     print(
-                        f"  analyze_query {idx}: Ollama 无有效 best_candidate_index，触发云端重排"
+                        f"  analyze_query {idx}: Ollama has no valid best_candidate_index, triggering cloud rerank"
                     )
         except Exception as e:
-            print(f"  analyze_query {idx} Ollama error: {e}，触发云端重排")
+            print(f"  analyze_query {idx} Ollama error: {e}, triggering cloud rerank")
             pre_cloud_trigger = "ollama_exception"
 
         if pl.get("bi_ollama_only"):
@@ -698,7 +698,7 @@ async def analyze_query(
 
             if not await orchestrator.budget_controller.can_afford(est_cloud_cost):
                 print(
-                    f"  DEBUG query {idx}: Budget insufficient，无法发起云端重排"
+                    f"  DEBUG query {idx}: Budget insufficient, cannot start cloud rerank"
                 )
                 cloud_fallback_reason = "budget_after_ollama_fail"
             else:
@@ -714,7 +714,7 @@ async def analyze_query(
                     best_c = _valid_best_candidate_index(parsed, len(pool))
                     if best_c is None:
                         print(
-                            f"  analyze_query {idx}: 云端返回无有效 best_candidate_index，不计费"
+                            f"  analyze_query {idx}: cloud returned no valid best_candidate_index, no charge"
                         )
                         cloud_fallback_reason = "cloud_invalid_parse"
                         cloud_verified = False
@@ -768,7 +768,7 @@ async def analyze_query(
 def _pipeline_final_rank_for_metrics(
     r: Dict[str, Any], *, skip_cloud: bool, bi_ce_only: bool = False
 ) -> int:
-    """与云边结合 MRR 相同的最终 GT 名次（0-based）；无有效流水线输出时为 -1。"""
+    """Final 0-based GT rank matching edge–cloud combined MRR; -1 if the pipeline has no valid output."""
     if skip_cloud:
         if r.get("edge_hit") and int(r.get("edge_rank", -1)) >= 0:
             return int(r["edge_rank"])
@@ -818,13 +818,13 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
         except ValueError:
             pass
         if is_clean:
-            print(f"数据集目录（GraphCodeBERT 清洗版）: {dataset_dir}")
+            print(f"Dataset directory (GraphCodeBERT clean): {dataset_dir}")
         else:
             print(
-                f"数据集目录（非清洗根下 java 或显式 CSN_JAVA_DIR）: {dataset_dir}\n"
-                f"  默认评测优先使用: {clean_java}\n"
-                f"  若需过滤协议与论文一致，请准备 {clean_java} 或运行: python scripts/prepare_csn_graphcodebert_clean.py\n"
-                f"  或取消设置 CSN_JAVA_DIR 以使用上述清洗路径（当 test.jsonl 可解析时）。"
+                f"Dataset directory (java under non-clean root or explicit CSN_JAVA_DIR): {dataset_dir}\n"
+                f"  Prefer for eval: {clean_java}\n"
+                f"  For protocol/paper alignment, use {clean_java} or run: python scripts/prepare_csn_graphcodebert_clean.py\n"
+                f"  Or unset CSN_JAVA_DIR to use the clean path when test.jsonl is loadable."
             )
         test_path = dataset_dir / "test.jsonl"
         codebase_path = dataset_dir / "codebase.jsonl"
@@ -873,11 +873,11 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
         print(f"Loaded {len(test_queries)} test queries.")
         if not test_queries:
             print(
-                "错误: test 查询为 0 条。请检查:\n"
-                f"  - test.jsonl 是否存在且非空: {test_path}\n"
-                "  - 是否用了错误的项目目录；本仓库会在数据盘尝试 code-ana1 / code-anal / code-analyze 下的数据集\n"
-                "  - 清洗版 test.jsonl 可能仅有 NL + url（无代码正文），请确认 url 非空且格式为 JSONL\n"
-                "  - 环境变量 CSN_JAVA_DIR 是否指向含有效 test.jsonl 的 java 目录"
+                "Error: zero test queries. Check:\n"
+                f"  - test.jsonl exists and is non-empty: {test_path}\n"
+                "  - project/data path: this repo may look under code-ana1 / code-anal / code-analyze on the data disk\n"
+                "  - clean test.jsonl may be NL + url only (no code); ensure url is non-empty and the file is JSONL\n"
+                "  - CSN_JAVA_DIR points to a java directory with a valid test.jsonl"
             )
             return
 
@@ -909,30 +909,30 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
         bi_ce_only = bool(getattr(args, "bi_ce_only", False))
         bi_ollama_only = bool(getattr(args, "bi_ollama_only", False))
         if bi_ce_only and skip_cloud:
-            print("错误: --bi-ce-only 与 --skip-cloud 不能同时使用。")
+            print("Error: --bi-ce-only and --skip-cloud cannot be used together.")
             return
         if bi_ollama_only and skip_cloud:
-            print("错误: --bi-ollama-only 与 --skip-cloud 不能同时使用。")
+            print("Error: --bi-ollama-only and --skip-cloud cannot be used together.")
             return
         if bi_ollama_only and bi_ce_only:
-            print("错误: --bi-ollama-only 与 --bi-ce-only 不能同时使用。")
+            print("Error: --bi-ollama-only and --bi-ce-only cannot be used together.")
             return
         if bi_ce_only:
             use_ce = True
             if llm_pool_k != retrieve_k:
                 print(
-                    f"[--bi-ce-only] CE 候选池与双塔 Top-K 对齐：llm_pool_k "
-                    f"{llm_pool_k} → {retrieve_k}（= --top-k）。"
+                    f"[--bi-ce-only] CE pool aligned with bi-encoder Top-K: llm_pool_k "
+                    f"{llm_pool_k} -> {retrieve_k} (= --top-k)."
                 )
             llm_pool_k = retrieve_k
         if bi_ollama_only:
             if getattr(args, "use_ce", False):
-                print("注意: --bi-ollama-only 与 --use-ce 互斥，已按无 CE 运行。")
+                print("Note: --bi-ollama-only conflicts with --use-ce; running without CE.")
             use_ce = False
             if llm_pool_k != retrieve_k:
                 print(
-                    f"[--bi-ollama-only] Ollama 候选池与双塔 Top-K 对齐：llm_pool_k "
-                    f"{llm_pool_k} → {retrieve_k}（= --top-k）。"
+                    f"[--bi-ollama-only] Ollama pool aligned with bi-encoder Top-K: llm_pool_k "
+                    f"{llm_pool_k} -> {retrieve_k} (= --top-k)."
                 )
             llm_pool_k = retrieve_k
 
@@ -940,29 +940,29 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
             print(f"Loading Cross-Encoder (--bi-ce-only): {ce_model_name} ...")
             ce_model = load_csn_cross_encoder(ce_model_name)
         elif bi_ollama_only:
-            print("[--bi-ollama-only] 跳过 Cross-Encoder 加载。")
+            print("[--bi-ollama-only] Skipping Cross-Encoder load.")
         elif not skip_cloud and use_ce:
             print(f"Loading Cross-Encoder: {ce_model_name} ...")
             ce_model = load_csn_cross_encoder(ce_model_name)
         elif not skip_cloud and not use_ce:
             print(
-                "Cross-Encoder 已关闭（脚本内 _CODE_SEARCH_USE_CE=False）；"
-                "LLM 池为双塔顺序截断。"
+                "Cross-Encoder is off (script has _CODE_SEARCH_USE_CE=False); "
+                "LLM pool is the bi-encoder order truncated."
             )
 
-        if not skip_cloud and not bi_ce_only:  # bi-ollama-only 需要 Ollama
+        if not skip_cloud and not bi_ce_only:  # bi-ollama-only needs Ollama
             ok, omsg = await orchestrator.local_inference.health_check()
             if not ok:
-                print(f"Ollama 不可用: {omsg}")
+                print(f"Ollama unavailable: {omsg}")
                 raise SystemExit(1)
             li = orchestrator.local_inference
             print(
-                f"[Ollama] 已连接 {li.base_url.rstrip('/')}, 模型 {li.model_name}"
+                f"[Ollama] connected {li.base_url.rstrip('/')}, model {li.model_name}"
             )
 
         force_cloud = bool(getattr(args, "force_cloud", False))
         if bi_ollama_only and force_cloud:
-            print("注意: --bi-ollama-only 下忽略 --force-cloud。")
+            print("Note: --force-cloud is ignored under --bi-ollama-only.")
         pl: Dict[str, Any] = {
             "retrieve_k": retrieve_k,
             "llm_pool_k": llm_pool_k,
@@ -991,45 +991,45 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
         elif bi_ce_only:
             print(
                 f"Pipeline (--bi-ce-only): bi-encoder retrieve_k={retrieve_k}, "
-                f"CE rerank pool={llm_pool_k}, eval Success@{args.top_k} 以 CE 池内名次为准；"
-                f"不调 Ollama/云；no_edge_hit 记失败"
+                f"CE rerank pool={llm_pool_k}, eval Success@{args.top_k} uses CE pool rank; "
+                f"no Ollama/cloud; no_edge_hit counts as failure"
             )
         elif bi_ollama_only:
             print(
                 f"Pipeline (--bi-ollama-only): bi-encoder retrieve_k={retrieve_k}, "
-                f"Ollama pool={llm_pool_k}, eval Success@{args.top_k} 以 Ollama 输出名次为准；"
-                f"无 CE、无任何云端调用；no_edge_hit 记失败"
+                f"Ollama pool={llm_pool_k}, eval Success@{args.top_k} uses Ollama output rank; "
+                f"no CE, no cloud calls; no_edge_hit counts as failure"
             )
         else:
             cloud_note = (
-                "；此外每条在 Ollama 成功后仍强制上云 (--force-cloud)"
+                "; also force cloud on every query after Ollama success (--force-cloud)"
                 if force_cloud
-                else "；失败或 needs_escalation 再上云"
+                else "; cloud on failure or needs_escalation"
             )
             if getattr(args, "no_cloud_rescue", False):
-                rescue_txt = "no_cloud_rescue: no_edge_hit 不上云解救"
+                rescue_txt = "no_cloud_rescue: no cloud rescue for no_edge_hit"
             elif cloud_rescue_refine:
                 rescue_txt = (
-                    f"no_edge_hit → 云端先改写检索 query，再双塔召回 top-{cloud_rescue_k}，"
-                    "最后云端在池内选定"
+                    f"no_edge_hit -> cloud refines search query, bi-encoder recalls top-{cloud_rescue_k}, "
+                    "cloud picks in pool"
                 )
             else:
                 rescue_txt = (
-                    f"no_edge_hit → 原 query 双塔召回 top-{cloud_rescue_k}，"
-                    "云端在池内选定 (--no-cloud-rescue-refine)"
+                    f"no_edge_hit -> original query, bi-encoder top-{cloud_rescue_k}, "
+                    "cloud picks in pool (--no-cloud-rescue-refine)"
                 )
-            ce_txt = "CE → " if use_ce else "无 CE → "
+            ce_txt = "CE -> " if use_ce else "no CE -> "
             print(
-                f"Pipeline: retrieve_k={retrieve_k}（= --top-k）, "
+                f"Pipeline: retrieve_k={retrieve_k} (= --top-k), "
                 f"Success@{args.top_k}, "
-                f"{ce_txt}Ollama{cloud_note} (pool={llm_pool_k}=min(配置,retrieve_k)); "
+                f"{ce_txt}Ollama{cloud_note} (pool={llm_pool_k}=min(config, retrieve_k)); "
                 f"{rescue_txt}"
             )
 
         workers = max(1, int(getattr(args, "workers", 1)))
         indexed = list(enumerate(test_queries))
         partitions = _chunk_indexed_evenly(indexed, workers)
-        # 多划分并发时串行化双塔+CE（GPU）：避免多协程同时占用模型。
+        # When using multiple partitions, serialize bi-encoder+CE (GPU) to avoid concurrent coroutines holding the model.
         search_lock: Optional[asyncio.Lock] = (
             asyncio.Lock() if len(partitions) > 1 else None
         )
@@ -1068,7 +1068,7 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
             results.extend(sub)
         results.sort(key=lambda r: r["query_idx"])
             
-        # Calculate Metrics（Edge@K：在 retrieve_k 条双塔结果里，GT 是否落在前 K 位）
+        # Calculate metrics (Edge@K: is GT in the top K of retrieve_k bi-encoder results?)
         eval_k = int(args.top_k)
         edge_mrr = 0.0
         ce_mrr = 0.0
@@ -1168,7 +1168,7 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
         cloud_call_rate = (
             sum(1 for r in results if r.get("cloud_verified")) / n if n else 0.0
         )
-        # 上云比例：实际已向云端发起 API 请求（含解析失败或 API 报错，不含预算拦截）
+        # Cloud call rate: cloud API was actually invoked (incl. parse errors or API errors, excluding budget block)
         _CLOUD_API_INVOKED = frozenset(
             {
                 "cloud_success_after_fallback",
@@ -1191,54 +1191,54 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
                 print(f"Cloud call success rate (verified): {cloud_call_rate*100:.2f}%")
             print("cloud_fallback_reason breakdown:", dict(cfr_counter))
 
-        print("\n--- 云边结合汇总 ---")
+        print("\n--- Edge–cloud combined summary ---")
         print(
-            f"边侧 Success@{eval_k}（双塔 retrieve_k={retrieve_k} 条中，GT 落在前 {eval_k} 位）: "
+            f"Edge Success@{eval_k} (GT in top {eval_k} of {retrieve_k} bi-encoder results): "
             f"{edge_success_at_k}/{n} ({_pct(edge_success_at_k, n)})"
         )
         _final_label = (
-            "仅双塔"
+            "bi-encoder only"
             if skip_cloud
             else (
-                "双塔+CE（--bi-ce-only）"
+                "bi-encoder+CE (--bi-ce-only)"
                 if bi_ce_only
-                else ("双塔+Ollama（--bi-ollama-only）" if bi_ollama_only else "全流水线")
+                else ("bi-encoder+Ollama (--bi-ollama-only)" if bi_ollama_only else "full pipeline")
             )
         )
         _decision_txt = (
-            "CE 池内名次"
+            "CE pool rank"
             if bi_ce_only
-            else ("Ollama 输出名次" if bi_ollama_only else "云 > Ollama")
+            else ("Ollama output rank" if bi_ollama_only else "cloud > Ollama")
         )
         _success_note = (
-            "与 CE 池内名次一致"
+            "same as CE pool rank"
             if bi_ce_only
             else (
-                "与 Ollama 名次一致（无云）"
+                "same as Ollama rank (no cloud)"
                 if bi_ollama_only
-                else "最终名次与 MRR 一致：云>Ollama>边"
+                else "final rank matches MRR: cloud > Ollama > edge"
             )
         )
         print(
-            f"云边结合 MRR（最终决策：{_decision_txt}；"
-            f"{_final_label}，分母为总 query 数 n）: "
+            f"Edge–cloud combined MRR (final decision: {_decision_txt}; "
+            f"{_final_label}, denominator = total queries n): "
             f"{edge_cloud_combined_mrr:.4f}"
         )
         print(
-            f"云边结合 Success@{eval_k}（{_success_note}；"
-            f"0<=rank<{eval_k} 计成功；retrieve_k={retrieve_k}）: "
+            f"Edge–cloud combined Success@{eval_k} ({_success_note}; "
+            f"0<=rank<{eval_k} counts as success; retrieve_k={retrieve_k}): "
             f"{edge_cloud_combined_success_at_k}/{n} "
             f"({_pct(edge_cloud_combined_success_at_k, n)})"
         )
         if skip_cloud:
-            print("上云比例（已发起云端 API 请求）: 0/{} (0.00%) [--skip-cloud]".format(n))
+            print("Cloud API invocation rate: 0/{} (0.00%) [--skip-cloud]".format(n))
         elif bi_ce_only:
-            print("上云比例（已发起云端 API 请求）: 0/{} (0.00%) [--bi-ce-only]".format(n))
+            print("Cloud API invocation rate: 0/{} (0.00%) [--bi-ce-only]".format(n))
         elif bi_ollama_only:
-            print("上云比例（已发起云端 API 请求）: 0/{} (0.00%) [--bi-ollama-only]".format(n))
+            print("Cloud API invocation rate: 0/{} (0.00%) [--bi-ollama-only]".format(n))
         else:
             print(
-                f"上云比例（已发起云端 API 请求）: {cloud_invocation_count}/{n} "
+                f"Cloud API invocation rate: {cloud_invocation_count}/{n} "
                 f"({cloud_invocation_rate*100:.2f}%)"
             )
 
@@ -1285,7 +1285,7 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
         await orchestrator.shutdown()
 
 def _load_config_with_env(config_path: str = "config/settings.yaml") -> dict:
-    """与 main.load_config 一致：加载 YAML，并展开 cloud.*.api_key 的 ${ENV} 占位符。"""
+    """Same as main.load_config: load YAML and expand ${ENV} placeholders in cloud.*.api_key."""
     import os
 
     import yaml
@@ -1307,7 +1307,7 @@ def _load_config_with_env(config_path: str = "config/settings.yaml") -> dict:
     return config
 
 
-# 未在 CLI 指定时，将 --top-k / --llm-pool-k / --cloud-rescue-k 对齐为同一值（云边同一 K）
+# When not set on the CLI, align --top-k / --llm-pool-k / --cloud-rescue-k to the same K (one K for edge and cloud)
 _JAVA_EVAL_TOP_K = 1
 
 
@@ -1318,7 +1318,7 @@ def _has_long_opt_java(argv: list[str], name: str) -> bool:
 
 
 def _inject_java_eval_k_defaults() -> None:
-    """未在 CLI 指定时，将 top-k / 云边池子 / 云解救召回与边侧 K 对齐为 1。"""
+    """When not set on the CLI, align top-k, cloud/edge pool, and cloud-rescue K to 1 for Java eval."""
     argv = sys.argv[1:]
     k = str(_JAVA_EVAL_TOP_K)
     inserts: list[str] = []
@@ -1338,69 +1338,70 @@ def main():
         "--sample",
         type=int,
         default=0,
-        help="评估的 test 查询条数；<=0 表示 test.jsonl 全量（默认 0=全量）",
+        help="Number of test queries to eval; <=0 means full test.jsonl (default 0 = all)",
     )
     parser.add_argument(
         "--index-size",
         type=int,
         default=0,
-        help="索引池条数上限；<=0 表示全量（默认：codebase.jsonl 全库，无则 test.jsonl 全量）",
+        help="Max index pool size; <=0 means all (default: full codebase.jsonl, else full test.jsonl if missing)",
     )
     parser.add_argument(
         "--top-k",
         type=int,
         default=1,
-        help="Success@K 的 K：双塔召回 retrieve_k、Ollama/云池子与各项 Success 均用此值（默认 1；未传时 main 内亦注入与 cloud_rescue 对齐）",
+        help="K for Success@K: bi-encoder retrieve_k, Ollama/cloud pool, all Success metrics (default 1; main also injects alignment with cloud_rescue when omitted)",
     )
     parser.add_argument(
         "--llm-pool-k",
         type=int,
         default=None,
-        help="Ollama/云候选池上限（实际 pool=min(本参数, retrieve_k)，retrieve_k=--top-k）",
+        help="Ollama/cloud candidate pool cap (actual pool = min(this, retrieve_k), retrieve_k = --top-k)",
     )
     parser.add_argument(
         "--bi-ollama-only",
         action="store_true",
         dest="bi_ollama_only",
-        help="仅双塔+Ollama：无 CE、无任何云端（含 Ollama 失败后也不上云）；与 --skip-cloud / --bi-ce-only / --use-ce 互斥；"
-        "自动将 llm_pool_k 设为与 --top-k 相同，使 Ollama 池与双塔 Top-K 对齐",
+        help="Bi-encoder + Ollama only: no CE, no cloud (not even after Ollama failure); "
+        "mutually exclusive with --skip-cloud / --bi-ce-only / --use-ce; "
+        "sets llm_pool_k = --top-k so the Ollama pool matches bi-encoder Top-K",
     )
     parser.add_argument(
         "--bi-ce-only",
         action="store_true",
         dest="bi_ce_only",
-        help="仅双塔+CE：CE 重排后以 CE 池内名次为最终指标，不调 Ollama/云；与 --skip-cloud 互斥；"
-        "自动将 llm_pool_k 设为与 --top-k 相同，使 CE 池与双塔 Top-K 对齐（可不写 --use-ce）",
+        help="Bi-encoder + CE only: final metrics use CE pool rank, no Ollama/cloud; "
+        "mutually exclusive with --skip-cloud; sets llm_pool_k = --top-k to align CE with bi-encoder Top-K (--use-ce optional)",
     )
     parser.add_argument(
         "--use-ce",
         action="store_true",
-        help="启用 Cross-Encoder 对双塔 Top-K 候选重排后再进 Ollama/云（仅双塔请加 --skip-cloud，不要加本项）",
+        help="Rerank bi-encoder Top-K with Cross-Encoder before Ollama/cloud (for bi-encoder only use --skip-cloud, not this)",
     )
     parser.add_argument(
         "--no-ce",
         action="store_true",
-        help="（保留占位；默认不启用 CE，除非传 --use-ce）",
+        help="(Reserved placeholder; CE off by default unless --use-ce)",
     )
     parser.add_argument(
         "--ce-model",
         type=str,
         default=None,
-        help="覆盖 config 中的 Cross-Encoder 模型名",
+        help="Override Cross-Encoder model name from config",
     )
     parser.add_argument("--encode-len", type=int, default=512, help="Code embedding max length")
     parser.add_argument("--query-max-len", type=int, default=512, help="Query encoding max length")
     parser.add_argument(
         "--skip-cloud",
         action="store_true",
-        help="仅双塔检索，不调云端重排",
+        help="Bi-encoder retrieval only, no cloud rerank",
     )
     parser.add_argument(
         "--force-cloud",
         action="store_true",
         help=(
-            "在 edge_hit 且走完 Ollama 后仍始终调用云端重排（提高上云比例；"
-            "与默认「Ollama 成功则不上云」相对，用于成本/消融对比）"
+            "After edge_hit and Ollama, always call cloud rerank (higher cloud share; "
+            "vs default 'skip cloud when Ollama succeeds'; for cost/ablation studies"
         ),
     )
     parser.add_argument(
@@ -1408,27 +1409,29 @@ def main():
         type=int,
         default=None,
         help=(
-            "no_edge_hit 时：双塔仅用相似度召回 top-K 候选集，再由云端在该集合上直接重排（默认 K 取 config code_search.cloud_rescue_k，否则 50）"
+            "On no_edge_hit: bi-encoder similarity top-K pool, cloud reranks on that set "
+            "(default K from config code_search.cloud_rescue_k, else 50)"
         ),
     )
     parser.add_argument(
         "--no-cloud-rescue",
         action="store_true",
-        help="no_edge_hit 时不走「双塔召回候选 + 云端重排」解救（仅记失败并结束，用于消融）",
+        help="On no_edge_hit, skip bi-encoder pool + cloud rescue (record failure only; for ablation)",
     )
     parser.add_argument(
         "--no-cloud-rescue-refine",
         action="store_true",
         help=(
-            "no_edge_hit 解救时不先做「云端改写检索 query」；直接用原 query 双塔召回 top-K，"
-            "仅云端在池内选定（省一次云调用；默认开启 refine，见 config code_search.cloud_rescue_refine）"
+            "no_edge_hit rescue: skip cloud query refinement; use original query for bi-encoder top-K, "
+            "cloud only picks in pool (saves one cloud call; refine on by default, see config code_search.cloud_rescue_refine)"
         ),
     )
     parser.add_argument(
         "--workers",
         type=int,
         default=8,
-        help="并行划分数：将样本均分为若干划分，划分之间并发执行，划分内顺序执行（单事件循环内 asyncio 并发，避免多线程与共享 Orchestrator 冲突）",
+        help="Number of parallel partitions: samples split evenly, partitions run concurrently, "
+        "in-order within partition (asyncio in one loop; avoids threads vs shared Orchestrator)",
     )
     args = parser.parse_args()
 

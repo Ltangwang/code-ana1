@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-CodeSearchNet 清洗版 Go 评测入口。
+CodeSearchNet (clean) Go evaluation entrypoint.
 
-- 默认将双塔 retrieve_k、Success@K、Ollama/云候选池、no_edge 云解救的 top-K 对齐为同一数值
-  （见 _GO_EVAL_TOP_K）；命令行显式传入 --top-k / --llm-pool-k / --cloud-rescue-k 时以命令行为准。
-- 默认权重目录与 train_unixcoder_csn_go.py 的 --output-dir 默认一致（见 default_unixcoder_csn_go_output_dir），
-  经 CODE_SEARCH_UNIXCODER_GO_PATH 与 config code_search.unixcoder_model_path_go 加载（后者优先且须为有效目录）。
+- By default, align bi-encoder retrieve_k, Success@K, Ollama/cloud candidate pool,
+  and no_edge cloud-rescue top-K to the same value (_GO_EVAL_TOP_K). CLI overrides
+  apply when --top-k / --llm-pool-k / --cloud-rescue-k are passed.
+- Default checkpoint dir matches train_unixcoder_csn_go.py --output-dir default
+  (default_unixcoder_csn_go_output_dir), loaded via CODE_SEARCH_UNIXCODER_GO_PATH
+  and config code_search.unixcoder_model_path_go (YAML wins if it is a valid dir).
 """
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-# 边侧 retrieve_k、评测 K、Ollama/云池子、cloud_rescue 对齐（云边同一 K）
+# Align edge retrieve_k, eval K, Ollama/cloud pool, cloud_rescue (same K edge/cloud)
 _GO_EVAL_TOP_K = 5
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -28,7 +30,7 @@ def _has_long_opt(argv: list[str], name: str) -> bool:
 
 
 def _inject_go_eval_k_defaults() -> None:
-    """未在 CLI 指定时，将 top-k / 云边池子 / 云解救召回与边侧 K 对齐为 5。"""
+    """If not set on CLI, inject top-k / pool / cloud-rescue K aligned to edge K (5)."""
     argv = sys.argv[1:]
     k = str(_GO_EVAL_TOP_K)
     inserts: list[str] = []
