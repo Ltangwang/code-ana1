@@ -151,7 +151,7 @@ class CloudClient:
         Args:
             prompt: User message content
             max_tokens: Completion token limit
-            system_prompt: Override default verifier system prompt (e.g. clone arbitration)
+            system_prompt: Override default verifier system prompt (e.g. retrieval arbitration)
             json_response_format: If True/False, force JSON mode on/off; if None, auto for GPT-like models
         
         Returns:

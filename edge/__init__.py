@@ -1,6 +1,5 @@
-"""Edge module: local Ollama inference and optional Java DFG helpers."""
+"""Edge module: local Ollama inference for code-search evaluation."""
 
-from .java_dfg_skeleton import extract_java_dfg_skeleton
 from .local_inference import OllamaInference
 
-__all__ = ["OllamaInference", "extract_java_dfg_skeleton"]
+__all__ = ["OllamaInference"]

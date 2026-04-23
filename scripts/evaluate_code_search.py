@@ -1,9 +1,9 @@
 """
 Evaluate Code Search using an Edge-Cloud Architecture.
 
-Fine-tuning (UniXcoder on CSN/BCB) is **not** invoked here: run ``scripts/train_unixcoder_csn.py`` or
-``scripts/train_unixcoder_bcb.py`` manually. This script only loads weights from config (or HF
-base checkpoints) and never starts training.
+Fine-tuning (UniXcoder on CodeSearchNet) is **not** invoked here: run ``scripts/train_unixcoder_csn.py``
+(or per-language ``train_unixcoder_csn_*.py``) manually. This script only loads weights from config
+(or Hugging Face base checkpoints) and never starts training.
 
 Edge: UniXcoder bi-encoder over the full CodeSearchNet corpus (``codebase.jsonl`` when present);
 ``retrieve_k = --top-k`` (same K as Success@K).
@@ -823,7 +823,7 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
             print(
                 f"Dataset directory (java under non-clean root or explicit CSN_JAVA_DIR): {dataset_dir}\n"
                 f"  Prefer for eval: {clean_java}\n"
-                f"  For protocol/paper alignment, use {clean_java} or run: python scripts/prepare_csn_graphcodebert_clean.py\n"
+                f"  For protocol/paper alignment, prepare GraphCodeBERT-style cleaned java under {clean_java}.\n"
                 f"  Or unset CSN_JAVA_DIR to use the clean path when test.jsonl is loadable."
             )
         test_path = dataset_dir / "test.jsonl"

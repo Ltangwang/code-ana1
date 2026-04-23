@@ -1,12 +1,6 @@
-"""Core module for orchestration, budget, and strategy helpers."""
+"""Core module: orchestration and budget for code-search evaluation."""
 
-from .orchestrator import Orchestrator
-from .strategy_manager import StrategyManager
 from .budget_controller import BudgetController
+from .orchestrator import Orchestrator
 
-__all__ = [
-    "Orchestrator",
-    "StrategyManager",
-    "BudgetController",
-]
-
+__all__ = ["Orchestrator", "BudgetController"]

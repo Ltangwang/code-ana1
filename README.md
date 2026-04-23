@@ -90,7 +90,7 @@ code-ana1/
 ├── scripts/                    # Eval, training, retriever, CE rerank
 ├── core/                       # Orchestration + budget
 ├── cloud/                      # Provider clients
-├── edge/                       # Ollama local inference, Java DFG helpers
+├── edge/                       # Ollama local inference
 ├── shared/                     # CSN paths, language profiles, schemas
 ├── figures/code_search_pipeline.mmd
 ├── examples/code_search_smoke/ # Tiny Ruby JSONL + README.sample.md
@@ -106,13 +106,6 @@ After you **clone** the repo or open it on **GitHub**, the synthetic Ruby JSONL 
 **How to use this fixture:** see **`examples/code_search_smoke/README.sample.md`** (sample documentation).
 
 ---
-
-## Other scripts
-
-| Area | Scripts |
-|------|---------|
-| Clone detection | `evaluate_clone_detection.py` |
-| BCB clone training | `train_unixcoder_bcb.py` |
 
 ## Tests
 

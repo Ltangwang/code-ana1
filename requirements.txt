@@ -1,35 +1,20 @@
-# Edge-Cloud Code Analysis Prototype - Dependencies
+# code-ana1: bi-encoder + Ollama + cloud code search
 
-# Core async and HTTP (asyncio is in the Python 3 stdlib; do not install the PyPI "asyncio" package)
+# Core async and HTTP (asyncio is in the Python 3 stdlib; do not install PyPI "asyncio")
 aiohttp==3.9.1
 httpx==0.25.2
 
-# AST parsing
-tree-sitter==0.21.0
-tree-sitter-python==0.21.0
-tree-sitter-java==0.21.0
-tree-sitter-javascript==0.21.0
-tree-sitter-cpp==0.21.0
-
-# Cloud LLM clients (Anthropic via OpenAI-compatible base_url needs only the openai package)
+# Cloud LLM clients
 openai==1.6.1
 
 # Data validation and schemas
 pydantic==2.5.3
-pydantic-settings==2.1.0
 
 # Configuration
 pyyaml==6.0.1
 
 # Logging
 structlog==23.2.0
-colorama==0.4.6
-
-# No database (budget is in-memory)
-
-# CLI
-click==8.1.7
-rich==13.7.0
 
 # Testing
 pytest==7.4.3
@@ -46,11 +31,12 @@ mypy==1.7.1
 python-dotenv==1.0.0
 tenacity==8.2.3
 
-# Clone detection eval: UniXcoder finetuned classifier (evaluate_clone_detection.py)
+# PyTorch (install CUDA build from pytorch.org if needed)
+torch>=2.1.0
+
+# UniXcoder / eval (evaluate_code_search, csn_retriever, train_unixcoder_csn*)
 transformers>=4.36.0
 datasets>=2.14.0
-scikit-learn>=1.3.0
-pandas>=2.0.0
 tqdm>=4.65.0
 numpy>=1.24.0
 # Cross-encoder rerank (evaluate_code_search / csn_ce_rerank)

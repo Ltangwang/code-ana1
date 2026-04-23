@@ -1,4 +1,4 @@
-"""Setup script for Edge-Cloud Code Analysis."""
+"""Setup script for code-ana1 (bi-encoder + Ollama + cloud code search)."""
 
 from setuptools import setup, find_packages
 
@@ -13,10 +13,10 @@ setup(
     version="0.1.0",
     author="Your Name",
     author_email="your.email@example.com",
-    description="Edge-Cloud collaborative code analysis prototype",
+    description="Bi-encoder + Ollama + cloud CodeSearchNet-style code retrieval",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/code-analyze",
+    url="https://github.com/ltangwang/code-ana1",
     packages=find_packages(exclude=["tests", "tests.*"]),
     classifiers=[
         "Development Status :: 3 - Alpha",
