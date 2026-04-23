@@ -82,17 +82,25 @@ code-ana1/
 ├── edge/
 ├── shared/
 ├── figures/code_search_pipeline.mmd
-├── examples/code_search_smoke/
+├── examples/code_search_smoke/   # 英文 README.md + 中文 README.zh.md
+├── README.zh.md                  # 本文件（对外主文档为英文 README.md）
 ├── config/
 └── requirements.txt
 ```
+
+### 样例在仓库 / GitHub 上的位置
+
+**克隆**本仓库或在 **GitHub** 网页里浏览时，上面命令用到的 **Ruby 合成 JSONL** 在：
+
+**`examples/code_search_smoke/ruby/`**（`codebase.jsonl` 建索引，`test.jsonl` 查询）。  
+说明见 `examples/code_search_smoke/README.md`（英文）或 `README.zh.md`（本目录中文）。
 
 ## 其它脚本
 
 | 方向 | 脚本 |
 |------|------|
 | 克隆检测 | `evaluate_clone_detection.py` |
-| BCB 训练 / RAG | `train_unixcoder_bcb.py`、`bcb_rag.py` |
+| BCB 克隆训练 | `train_unixcoder_bcb.py` |
 
 ## 测试
 

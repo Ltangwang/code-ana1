@@ -101,6 +101,13 @@ code-ana1/
 └── requirements.txt
 ```
 
+### Where the smoke mini-dataset lives (including on GitHub)
+
+After you **clone** the repo or open it on **GitHub**, the synthetic Ruby JSONL used in the commands above is under:
+
+**`examples/code_search_smoke/ruby/`** — files `codebase.jsonl` (index) and `test.jsonl` (queries).  
+More detail: `examples/code_search_smoke/README.md`.
+
 ---
 
 ## Other scripts
@@ -108,7 +115,7 @@ code-ana1/
 | Area | Scripts |
 |------|---------|
 | Clone detection | `evaluate_clone_detection.py` |
-| BCB train / RAG | `train_unixcoder_bcb.py`, `bcb_rag.py` |
+| BCB clone training | `train_unixcoder_bcb.py` |
 
 ## Tests
 
