@@ -2,7 +2,7 @@
 
 This repository implements **CodeSearchNet-style code retrieval**: a **bi-encoder** recalls candidates from the full corpus, **Ollama** reranks and gates on the candidate pool, and a **cloud LLM** can rewrite queries, widen search, and rerank when the pipeline escalates—subject to config and budget.
 
-**Repository:** <https://github.com/ltangwang/code-ana1>
+**Repository:** [github.com/ltangwang/code-ana1](https://github.com/ltangwang/code-ana1)
 
 Flow diagram: `figures/code_search_pipeline.mmd` ([mermaid.live](https://mermaid.live) or a VS Code Mermaid extension).
 
@@ -26,7 +26,7 @@ Supporting code: `core/orchestrator.py` (Ollama session, cloud factory, budget),
 | Component | What you need |
 |-----------|----------------|
 | **Python** | 3.9+ |
-| **Ollama** | Install from [ollama.com](https://ollama.com/), run the daemon, `ollama pull <model>` matching `settings.yaml` → `ollama.model_name`. |
+| **Ollama** | Install from [ollama.com](https://ollama.com/), run the daemon, `ollama pull` the model name that matches `settings.yaml` → `ollama.model_name`. |
 | **Cloud LLM** | API keys in `.env` and referenced from `settings.yaml` (e.g. OpenAI-compatible or DashScope). Required for full pipeline (not for `--skip-cloud` smoke). |
 | **Hardware** | GPU recommended for UniXcoder / Cross-encoder; CPU possible but slower. |
 | **Config** | Create local `config/settings.yaml` (gitignored by default). See `config/thresholds.yaml` for optional reference values. |
