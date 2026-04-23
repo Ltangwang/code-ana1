@@ -6,8 +6,6 @@ This repository implements **CodeSearchNet-style code retrieval**: a **bi-encode
 
 Flow diagram: `figures/code_search_pipeline.mmd` ([mermaid.live](https://mermaid.live) or a VS Code Mermaid extension).
 
-**Chinese overview (for reading):** see [`README.zh.md`](README.zh.md).
-
 ---
 
 ## End-to-end pipeline
@@ -95,8 +93,7 @@ code-ana1/
 ├── edge/                       # Ollama local inference, Java DFG helpers
 ├── shared/                     # CSN paths, language profiles, schemas
 ├── figures/code_search_pipeline.mmd
-├── examples/code_search_smoke/ # Tiny Ruby JSONL; English README (+ README.zh.md)
-├── README.zh.md                # Chinese overview (GitHub primary doc is README.md)
+├── examples/code_search_smoke/ # Tiny Ruby JSONL + README (see below)
 ├── config/
 └── requirements.txt
 ```
@@ -106,7 +103,7 @@ code-ana1/
 After you **clone** the repo or open it on **GitHub**, the synthetic Ruby JSONL used in the commands above is under:
 
 **`examples/code_search_smoke/ruby/`** — files `codebase.jsonl` (index) and `test.jsonl` (queries).  
-More detail: `examples/code_search_smoke/README.md`.
+**How to use this fixture:** see **`examples/code_search_smoke/README.md`** (the sample’s only README).
 
 ---
 
