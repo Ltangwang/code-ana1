@@ -73,6 +73,7 @@ code-ana1/
 ├── edge/                            # Local inference (Ollama), etc.
 ├── shared/                          # CSN paths, language profiles, schemas, etc.
 ├── figures/code_search_pipeline.mmd # Pipeline diagram
+├── examples/code_search_smoke/      # Tiny Ruby JSONL fixture (format + smoke test; see its README)
 ├── config/
 └── requirements.txt
 ```
