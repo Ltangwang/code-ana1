@@ -87,7 +87,7 @@ $env:CSN_LANG_DIR = "$PWD\examples\code_search_smoke\ruby"
 python scripts/evaluate_code_search_ruby.py --sample 3 --skip-cloud --top-k 10 --llm-pool-k 10 --cloud-rescue-k 10 --index-size 20 --pretrained-base-only
 ```
 
-See also: `examples/code_search_smoke/README.sample.md`.
+See also: `examples/code_search_smoke/README.sample.md` (conceptual pipeline + Linux/PowerShell for all three modes).
 
 ---
 
