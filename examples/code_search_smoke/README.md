@@ -4,11 +4,11 @@
 
 | What | Path (from repository root) |
 |------|------------------------------|
-| **This file** | `examples/code_search_smoke/README.sample.md` |
+| **This file** | `examples/code_search_smoke/README.md` |
 | **Ruby JSONL (index)** | `examples/code_search_smoke/ruby/codebase.jsonl` |
 | **Ruby JSONL (queries)** | `examples/code_search_smoke/ruby/test.jsonl` |
 
-After you clone the repo or browse it on GitHub, open the **`examples/code_search_smoke`** folder: **`README.sample.md`** (this file) sits next to **`ruby/`**. It is the only documentation for this sample.
+On **GitHub**, open the **`examples/code_search_smoke`** folder: this **`README.md`** is rendered in the folder view and sits next to **`ruby/`**.
 
 ---
 
@@ -142,7 +142,7 @@ python scripts/evaluate_code_search_ruby.py `
 
 ```
 examples/code_search_smoke/
-├── README.sample.md  # this file (sample documentation)
+├── README.md          # this file (shown on GitHub in this folder)
 └── ruby/
     ├── codebase.jsonl   # retrieval index (10 synthetic methods)
     └── test.jsonl       # 3 queries (docstring + gold url)

@@ -87,7 +87,7 @@ $env:CSN_LANG_DIR = "$PWD\examples\code_search_smoke\ruby"
 python scripts/evaluate_code_search_ruby.py --sample 3 --skip-cloud --top-k 10 --llm-pool-k 10 --cloud-rescue-k 10 --index-size 20 --pretrained-base-only
 ```
 
-See also: `examples/code_search_smoke/README.sample.md` (conceptual pipeline + Linux/PowerShell for all three modes).
+See also: `examples/code_search_smoke/README.md` (conceptual pipeline + Linux/PowerShell for all three modes; rendered under that folder on GitHub).
 
 ---
 
@@ -101,7 +101,7 @@ code-ana1/
 ├── edge/                       # Ollama local inference
 ├── shared/                     # CSN paths, language profiles, schemas
 ├── figures/code_search_pipeline.mmd
-├── examples/code_search_smoke/ # Tiny Ruby JSONL + README.sample.md
+├── examples/code_search_smoke/ # Tiny Ruby JSONL + README.md
 ├── config/
 └── requirements.txt
 ```
@@ -111,7 +111,7 @@ code-ana1/
 After you **clone** the repo or open it on **GitHub**, the synthetic Ruby JSONL used in the commands above is under:
 
 **`examples/code_search_smoke/ruby/`** — files `codebase.jsonl` (index) and `test.jsonl` (queries).  
-**How to use this fixture:** see **`examples/code_search_smoke/README.sample.md`** (sample documentation).
+**How to use this fixture:** see **`examples/code_search_smoke/README.md`** (opens in the GitHub folder view).
 
 ---
 
