@@ -18,24 +18,33 @@ After you clone the repo or browse it on GitHub, open the **`examples/code_searc
 
 ---
 
-## Intended run: **bi-encoder + Ollama + cloud** (**K = 10**)
+## Pipeline this sample follows (conceptual order)
 
-The **default, end-to-end** path this repo is built for is:
+End-to-end design is **three layers** on top of the same Top-K pool (here **K = 10**):
 
-**dense bi-encoder (dual-tower) retrieval** → optional cross-encoder → **Ollama** on the candidate pool → **cloud** when the pipeline escalates (query rewrite, rescue retrieval, cloud rerank), as configured.
+| Stage | What runs | Role |
+|-------|-----------|------|
+| **1. Dual-tower (bi-encoder)** | UniXcoder encodes query + code | Dense retrieval over `codebase.jsonl` → **Top-K** candidates for each query in `test.jsonl`. |
+| **2. Ollama (edge)** | Local LLM | Reranks / interprets the **LLM pool** (aligned with Top-K), returns structured JSON (e.g. best index, whether to escalate). |
+| **3. Cloud** | Remote LLM APIs | Used when the pipeline **escalates**: e.g. Ollama empty/invalid, `needs_escalation`, or **no-edge-hit rescue** (refined query + re-retrieve + cloud pick), per `settings.yaml` and budget. |
 
-The commands below run that **full** stack (do **not** pass `--skip-cloud`). A separate subsection further down explains **bi-encoder-only** runs and **why** they exist—they are **not** a substitute for the full pipeline.
+**Optional cross-encoder:** Add `--use-ce` on the full pipeline to rerank the bi-encoder Top-K **before** Ollama. The smoke commands below leave CE **off** for simplicity.
 
-### Before you run
+---
 
-1. **Ollama:** Install and start the service. `ollama pull` the model name that matches `config/settings.yaml` → `ollama.model_name`.
-2. **Cloud:** Set API keys in `.env` and wire `cloud.*` in `settings.yaml` (e.g. `${OPENAI_API_KEY}`).
-3. **Config:** Local `config/settings.yaml` must exist (see repository root `README.md`).
-4. **K:** Use **`--top-k 10 --llm-pool-k 10 --cloud-rescue-k 10`** so retrieval, LLM pool, and cloud rescue share **K = 10** (edge/cloud aligned).
+## How to run the smoke (three CLI modes)
 
-### Commands
+Run from the **repository root**. Set `CSN_LANG_DIR` to **`examples/code_search_smoke/ruby`**.
 
-Run from the **repository root**; point `CSN_LANG_DIR` at the `ruby` subfolder under **this** directory (`examples/code_search_smoke/ruby`).
+**K convention:** keep **`--top-k 10 --llm-pool-k 10 --cloud-rescue-k 10`** so retrieval, Ollama/cloud pool, and cloud rescue share the same K (the Ruby wrapper also injects these defaults if you omit them).
+
+**Flags are mutually exclusive:** do not combine `--skip-cloud` with `--bi-ollama-only`.
+
+### Mode 3 — **Full pipeline: bi-encoder + Ollama + cloud** (recommended)
+
+This is the **intended** system: dual-tower recall → Ollama on the pool → cloud when escalation or rescue requires it.
+
+**Prerequisites:** Ollama running + model pulled (`ollama.model_name` in `config/settings.yaml`); cloud keys in `.env` / `settings.yaml`; local `config/settings.yaml`.
 
 **Linux / macOS**
 
@@ -63,13 +72,45 @@ python scripts/evaluate_code_search_ruby.py `
   --pretrained-base-only
 ```
 
-First-time `--pretrained-base-only` will download UniXcoder base weights from Hugging Face.
+First-time `--pretrained-base-only` downloads UniXcoder **base** weights from Hugging Face.
 
-### Optional: bi-encoder only (`--skip-cloud`)
+### Mode 2 — **Bi-encoder + Ollama** (no cloud API calls)
 
-**Why this mode exists:** With `--skip-cloud`, the script **does not** call Ollama or cloud providers. That is useful when you only want to **verify retrieval** (indexing, Top-K, metrics shape), or you **lack** a running Ollama daemon / **cloud API keys**, or you are in **CI** and want a fast, deterministic smoke without external services.
+Use **`--bi-ollama-only`**: same dual-tower retrieval and Ollama stage as above, but **no cloud** (no rescue/refine/rerank via remote APIs). Useful when you have Ollama but **no** cloud keys, or you want to isolate edge LLM behavior.
 
-**It is not the main story:** The designed pipeline is **bi-encoder + Ollama + cloud**. Use `--skip-cloud` only as a **shortcut or debug** path; for a real end-to-end check, use the commands above **without** `--skip-cloud`.
+**Prerequisites:** Ollama + `settings.yaml` as for Mode 3; cloud keys **not** required.
+
+**Linux / macOS**
+
+```bash
+export CSN_LANG_DIR="$(pwd)/examples/code_search_smoke/ruby"
+python scripts/evaluate_code_search_ruby.py \
+  --sample 3 \
+  --bi-ollama-only \
+  --top-k 10 \
+  --llm-pool-k 10 \
+  --cloud-rescue-k 10 \
+  --index-size 20 \
+  --pretrained-base-only
+```
+
+**Windows (PowerShell)**
+
+```powershell
+$env:CSN_LANG_DIR = "$PWD\examples\code_search_smoke\ruby"
+python scripts/evaluate_code_search_ruby.py `
+  --sample 3 `
+  --bi-ollama-only `
+  --top-k 10 `
+  --llm-pool-k 10 `
+  --cloud-rescue-k 10 `
+  --index-size 20 `
+  --pretrained-base-only
+```
+
+### Mode 1 — **Bi-encoder only** (`--skip-cloud`)
+
+**Neither Ollama nor cloud** run. Metrics reflect **retrieval-only** Success@K on the bi-encoder ranked list. Use for **CI**, quick index smoke, or when you have **no** Ollama and **no** cloud.
 
 ```bash
 export CSN_LANG_DIR="$(pwd)/examples/code_search_smoke/ruby"
@@ -80,6 +121,18 @@ python scripts/evaluate_code_search_ruby.py \
   --llm-pool-k 10 \
   --cloud-rescue-k 10 \
   --index-size 20 \
+  --pretrained-base-only
+```
+
+```powershell
+$env:CSN_LANG_DIR = "$PWD\examples\code_search_smoke\ruby"
+python scripts/evaluate_code_search_ruby.py `
+  --sample 3 `
+  --skip-cloud `
+  --top-k 10 `
+  --llm-pool-k 10 `
+  --cloud-rescue-k 10 `
+  --index-size 20 `
   --pretrained-base-only
 ```
 

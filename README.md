@@ -73,7 +73,14 @@ Before running:
 2. Fill **cloud** keys for the providers your `settings.yaml` uses.
 3. For real benchmarks, point `CSN_LANG_DIR` (or language dirs under `CodeSearchNet_clean_Dataset`) at full **GraphCodeBERT-clean** splits—not only the smoke fixture.
 
-**Optional — bi-encoder only (`--skip-cloud`):** Skips Ollama and cloud. Use this to sanity-check **retrieval only**, or when Ollama/cloud are unavailable (e.g. CI, no API keys). It is **not** a replacement for the full **bi-encoder + Ollama + cloud** run above.
+**Middle tier — bi-encoder + Ollama (`--bi-ollama-only`):** Same retrieval and Ollama as the full pipeline, but **no cloud** calls. Handy when Ollama is available but cloud keys are not.
+
+```powershell
+$env:CSN_LANG_DIR = "$PWD\examples\code_search_smoke\ruby"
+python scripts/evaluate_code_search_ruby.py --sample 3 --bi-ollama-only --top-k 10 --llm-pool-k 10 --cloud-rescue-k 10 --index-size 20 --pretrained-base-only
+```
+
+**Optional — bi-encoder only (`--skip-cloud`):** Skips Ollama and cloud. Use for **retrieval-only** smoke (e.g. CI). Not a substitute for the full **bi-encoder + Ollama + cloud** run.
 
 ```powershell
 $env:CSN_LANG_DIR = "$PWD\examples\code_search_smoke\ruby"
