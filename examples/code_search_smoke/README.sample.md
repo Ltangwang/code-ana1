@@ -18,13 +18,17 @@ After you clone the repo or browse it on GitHub, open the **`examples/code_searc
 
 ---
 
-## Full pipeline (Ollama + cloud, **K = 10**)
+## Intended run: **bi-encoder + Ollama + cloud** (**K = 10**)
 
-This matches the intended **end-to-end** run: bi-encoder → (optional CE) → **Ollama** → **cloud** when escalated.
+The **default, end-to-end** path this repo is built for is:
+
+**dense bi-encoder (dual-tower) retrieval** → optional cross-encoder → **Ollama** on the candidate pool → **cloud** when the pipeline escalates (query rewrite, rescue retrieval, cloud rerank), as configured.
+
+The commands below run that **full** stack (do **not** pass `--skip-cloud`). A separate subsection further down explains **bi-encoder-only** runs and **why** they exist—they are **not** a substitute for the full pipeline.
 
 ### Before you run
 
-1. **Ollama:** Install and start the service. `ollama pull <model>` for the model named in `config/settings.yaml` → `ollama.model_name`.
+1. **Ollama:** Install and start the service. `ollama pull` the model name that matches `config/settings.yaml` → `ollama.model_name`.
 2. **Cloud:** Set API keys in `.env` and wire `cloud.*` in `settings.yaml` (e.g. `${OPENAI_API_KEY}`).
 3. **Config:** Local `config/settings.yaml` must exist (see repository root `README.md`).
 4. **K:** Use **`--top-k 10 --llm-pool-k 10 --cloud-rescue-k 10`** so retrieval, LLM pool, and cloud rescue share **K = 10** (edge/cloud aligned).
@@ -61,9 +65,11 @@ python scripts/evaluate_code_search_ruby.py `
 
 First-time `--pretrained-base-only` will download UniXcoder base weights from Hugging Face.
 
-### Bi-encoder only (no Ollama, no cloud)
+### Optional: bi-encoder only (`--skip-cloud`)
 
-For a quick shape check:
+**Why this mode exists:** With `--skip-cloud`, the script **does not** call Ollama or cloud providers. That is useful when you only want to **verify retrieval** (indexing, Top-K, metrics shape), or you **lack** a running Ollama daemon / **cloud API keys**, or you are in **CI** and want a fast, deterministic smoke without external services.
+
+**It is not the main story:** The designed pipeline is **bi-encoder + Ollama + cloud**. Use `--skip-cloud` only as a **shortcut or debug** path; for a real end-to-end check, use the commands above **without** `--skip-cloud`.
 
 ```bash
 export CSN_LANG_DIR="$(pwd)/examples/code_search_smoke/ruby"

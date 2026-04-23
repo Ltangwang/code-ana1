@@ -60,7 +60,7 @@ Eval scripts substitute `${VAR}` in `cloud.*.api_key` from the environment.
 
 **Convention:** use **`--top-k 10 --llm-pool-k 10 --cloud-rescue-k 10`** so bi-encoder recall, LLM pool, and cloud rescue share the same K unless you intentionally ablate.
 
-Example (full pipeline, Ruby smoke corpus):
+**Full pipeline (intended): bi-encoder + Ollama + cloud** — Ruby smoke corpus, **no** `--skip-cloud`:
 
 ```powershell
 $env:CSN_LANG_DIR = "$PWD\examples\code_search_smoke\ruby"
@@ -73,9 +73,10 @@ Before running:
 2. Fill **cloud** keys for the providers your `settings.yaml` uses.
 3. For real benchmarks, point `CSN_LANG_DIR` (or language dirs under `CodeSearchNet_clean_Dataset`) at full **GraphCodeBERT-clean** splits—not only the smoke fixture.
 
-Bi-encoder-only quick check (no Ollama, no cloud):
+**Optional — bi-encoder only (`--skip-cloud`):** Skips Ollama and cloud. Use this to sanity-check **retrieval only**, or when Ollama/cloud are unavailable (e.g. CI, no API keys). It is **not** a replacement for the full **bi-encoder + Ollama + cloud** run above.
 
 ```powershell
+$env:CSN_LANG_DIR = "$PWD\examples\code_search_smoke\ruby"
 python scripts/evaluate_code_search_ruby.py --sample 3 --skip-cloud --top-k 10 --llm-pool-k 10 --cloud-rescue-k 10 --index-size 20 --pretrained-base-only
 ```
 
