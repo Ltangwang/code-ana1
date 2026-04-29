@@ -18,10 +18,9 @@ apply_autodl_data_disk_env()
 
 from datasets import load_dataset
 
-# Write smaller splits first so SSH/session loss does not leave only huge train on disk and no test (eval needs test.jsonl)
+# test/val before train so interrupted runs still have test.jsonl
 _SPLIT_SAVE_ORDER = ("test", "validation", "train")
 
-# Hugging Face `code_search_net` per-language configs (same as datasets lib; no aggregate "all" config)
 _CSN_KNOWN_LANGS = frozenset({"go", "java", "javascript", "php", "python", "ruby"})
 
 _CSN_DISPLAY_NAMES: dict[str, str] = {
@@ -45,7 +44,7 @@ def _ordered_split_names(keys: list[str]) -> list[str]:
 
 
 def _atomic_write_jsonl_stream(path: Path, rows) -> None:
-    """Stream to a temp file then replace, to avoid holding huge train in memory."""
+    """Tempfile + replace; avoids huge train in RAM."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
         suffix=".jsonl.tmp", prefix=path.name + ".", dir=str(path.parent)
@@ -64,7 +63,7 @@ def _atomic_write_jsonl_stream(path: Path, rows) -> None:
 
 
 def _resolve_output_dir(output_dir: str) -> Path:
-    """If relative, resolve against repo root (matches local layout)."""
+    """Relative paths from repo root."""
     p = Path(output_dir)
     if p.is_absolute():
         return p.resolve()
@@ -72,7 +71,7 @@ def _resolve_output_dir(output_dir: str) -> Path:
 
 
 def _write_language_marker(lang_dir: Path, language_id: str, split_names: list[str]) -> None:
-    """Per-language dir: write LANGUAGE_INFO.json for manual inspection."""
+    """Write LANGUAGE_INFO.json under lang_dir."""
     info = {
         "dataset": "CodeSearchNet",
         "huggingface_id": "code_search_net",
@@ -119,7 +118,7 @@ def download_and_save(language: str = "java", output_dir: str | None = None) -> 
 def download_languages(
     languages: list[str], output_dir: str | None = None
 ) -> Path:
-    """Download several languages; each is {output_root}/{language_id}/"""
+    """Each lang under ``{root}/{lang}/``."""
     apply_autodl_data_disk_env()
     root = _resolve_output_dir(output_dir) if output_dir else default_csn_dataset_root()
     root.mkdir(parents=True, exist_ok=True)

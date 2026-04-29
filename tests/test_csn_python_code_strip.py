@@ -1,5 +1,3 @@
-"""Unit tests for shared.csn_python_code_strip."""
-
 from shared.csn_python_code_strip import strip_python_code_docstrings
 
 
