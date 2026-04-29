@@ -1,4 +1,4 @@
-"""Orchestrator for code-search evaluation: Ollama, cloud clients, and budget."""
+"""Wires Ollama, cloud clients, and budget for CSN eval."""
 
 from typing import Any, Dict, Optional
 
@@ -13,7 +13,7 @@ logger = structlog.get_logger()
 
 
 class Orchestrator:
-    """Coordinates edge Ollama, cloud factory, and budget for retrieval eval scripts."""
+    """async context: init Ollama session + ``ProviderFactory``."""
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config

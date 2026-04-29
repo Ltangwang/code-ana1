@@ -1,4 +1,4 @@
-"""Shared data schemas for Edge-Cloud code analysis."""
+"""Pydantic types for LLM I/O and budgeting."""
 
 from datetime import datetime
 from enum import Enum

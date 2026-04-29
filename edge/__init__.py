@@ -1,4 +1,4 @@
-"""Edge module: local Ollama inference for code-search evaluation."""
+"""Ollama inference export."""
 
 from .local_inference import OllamaInference
 

@@ -1,9 +1,8 @@
-"""Cloud LLM client for verification using OpenAI-compatible API."""
+"""OpenAI-compatible async client for cloud LLM calls."""
 
 import json
 import time
 from typing import Dict, Any, Optional
-from datetime import datetime
 
 from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -17,19 +16,12 @@ from shared.prompts import PromptTemplates, estimate_cost
 
 
 class CloudClient:
-    """Cloud LLM client using OpenAI-compatible API."""
-    
+    """OpenAI-compatible chat API wrapper."""
+
     def __init__(self, config: Dict[str, Any], provider: str = "openai"):
-        """Initialize cloud client.
-        
-        Args:
-            config: Configuration dict with API settings
-            provider: Provider name (openai, anthropic, custom)
-        """
         self.provider = provider
         self.config = config
-        
-        # Extract provider-specific config
+
         provider_config = config.get(provider, {})
         
         api_key = provider_config.get('api_key', '')
@@ -38,24 +30,19 @@ class CloudClient:
         self.timeout = provider_config.get('timeout', 60)
         self.max_retries = provider_config.get('max_retries', 3)
         
-        # Initialize OpenAI client (compatible with many providers)
         self.client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url if base_url else None,
             timeout=self.timeout,
             max_retries=self.max_retries
         )
-        
+
         self._call_count = 0
         self._total_tokens = 0
         self._total_cost = 0.0
-    
+
     async def aclose(self) -> None:
-        """Release httpx connections held by AsyncOpenAI."""
-        try:
-            await self.client.close()
-        except Exception:
-            pass
+        """Close the underlying HTTP client."""
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def verify(
@@ -63,45 +50,28 @@ class CloudClient:
         draft: AnalysisDraft,
         mode: str = "verification"
     ) -> VerificationResult:
-        """Verify an analysis draft using cloud LLM.
-        
-        Args:
-            draft: Local analysis draft
-            mode: verification (quick check) or refinement (deep analysis)
-        
-        Returns:
-            VerificationResult with refined analysis
-        """
+        """Run verification or refinement prompt; increment usage counters."""
         start_time = time.time()
-        
-        # Format prompt based on mode
+
         if mode == "refinement":
             prompt = PromptTemplates.format_refinement_prompt(draft)
         else:
             prompt = PromptTemplates.format_verification_prompt(draft)
-        
-        # Estimate cost before calling
+
         estimated_cost = estimate_cost(prompt, 300, self.model)
-        
-        # Call cloud API
         response = await self._call_api(prompt)
-        
-        # Calculate latency
         latency_ms = (time.time() - start_time) * 1000
-        
-        # Parse response
         result = self._parse_verification_response(
             response,
             draft,
             latency_ms,
             mode
         )
-        
-        # Update metrics
+
         self._call_count += 1
         self._total_tokens += result.tokens_used
         self._total_cost += estimated_cost
-        
+
         return result
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
@@ -111,25 +81,15 @@ class CloudClient:
         description: str,
         candidates: list[str]
     ) -> tuple[int, str]:
-        """Select the best fix from candidates.
-        
-        Args:
-            fragment: Code fragment
-            description: Issue description
-            candidates: List of candidate fixes
-        
-        Returns:
-            (selected_index, rationale)
-        """
+        """Pick best fix index from JSON in the model reply."""
         prompt = PromptTemplates.format_selection_prompt(
             fragment,
             description,
             candidates
         )
-        
+
         response = await self._call_api(prompt)
-        
-        # Parse selection
+
         try:
             data = json.loads(response['content'])
             selected_idx = data.get('selected_index', 0)
@@ -146,17 +106,7 @@ class CloudClient:
         system_prompt: Optional[str] = None,
         json_response_format: Optional[bool] = None,
     ) -> Dict[str, Any]:
-        """Call cloud API using OpenAI-compatible interface.
-        
-        Args:
-            prompt: User message content
-            max_tokens: Completion token limit
-            system_prompt: Override default verifier system prompt (e.g. retrieval arbitration)
-            json_response_format: If True/False, force JSON mode on/off; if None, auto for GPT-like models
-        
-        Returns:
-            API response dict with content, tokens, model
-        """
+        """chat.completions; optional system prompt and JSON response_format."""
         try:
             sys_content = (
                 system_prompt
@@ -198,17 +148,6 @@ class CloudClient:
         latency_ms: float,
         mode: str
     ) -> VerificationResult:
-        """Parse cloud verification response.
-        
-        Args:
-            response: Raw API response
-            draft: Original draft
-            latency_ms: API latency
-            mode: verification or refinement
-        
-        Returns:
-            Parsed VerificationResult
-        """
         content = response['content']
         tokens = response['tokens']
         
@@ -216,7 +155,6 @@ class CloudClient:
             data = json.loads(content)
             
             if mode == "refinement":
-                # Refinement mode response
                 analysis_result = data.get('analysis_result', 'unclear')
                 verified = analysis_result == 'confirmed_bug'
                 
@@ -239,7 +177,6 @@ class CloudClient:
                 )
             
             else:
-                # Verification mode response
                 is_real = data.get('is_real_bug', True)
                 refined_desc = data.get('refined_description', draft.description)
                 best_idx = data.get('best_fix_index')
@@ -261,7 +198,6 @@ class CloudClient:
                 )
         
         except json.JSONDecodeError:
-            # Fallback: treat as verification failure
             return VerificationResult(
                 draft_id=f"{draft.fragment.file_path}:{draft.fragment.start_line}",
                 verified=False,
@@ -275,11 +211,7 @@ class CloudClient:
             )
     
     def get_metrics(self) -> Dict[str, Any]:
-        """Get client metrics.
-        
-        Returns:
-            Dict with call count, tokens, cost
-        """
+        """calls / tokens / spend snapshot."""
         return {
             'provider': self.provider,
             'model': self.model,
@@ -290,17 +222,9 @@ class CloudClient:
         }
     
     async def health_check(self, verbose: bool = False) -> bool:
-        """Check if cloud API is accessible.
-        
-        Args:
-            verbose: If True, print error details
-        
-        Returns:
-            True if healthy
-        """
+        """Tiny chat completion to see if credentials/route work."""
         try:
-            # Simple test call
-            response = await self.client.chat.completions.create(
+            await self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": "test"}],
                 max_tokens=5

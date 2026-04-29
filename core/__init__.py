@@ -1,4 +1,4 @@
-"""Core module: orchestration and budget for code-search evaluation."""
+"""Orchestration + budget."""
 
 from .budget_controller import BudgetController
 from .orchestrator import Orchestrator

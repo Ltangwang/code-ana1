@@ -1,15 +1,6 @@
-"""
-Code search evaluation (non-Java): same pipeline as ``evaluate_code_search.py``; only language
-and data paths differ.
+"""Non-Java CodeSearchNet eval (same pipeline as evaluate_code_search.py; paths/prompts per language).
 
-- Data: defaults to ``CodeSearchNet_clean_Dataset/<language>/`` (go|javascript|php|python|ruby).
-- Prompts: per-language (JSDoc, docstring, PHPDoc, Go doc, RDoc, etc.); fenced code uses the
-  language-appropriate label.
-- Outputs: monotonic ``results_code_search_<language>.json`` so runs do not overwrite Java
-  result files.
-
-Use ``scripts/evaluate_code_search.py`` for Java.
-"""
+Java: evaluate_code_search.py. Writes ``results_code_search_<lang>.json``."""
 
 import argparse
 import asyncio
@@ -23,7 +14,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
-# Add project root to sys.path
 _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
 
@@ -53,14 +43,14 @@ _CODE_SEARCH_USE_CE = False
 
 
 def _default_results_dir() -> Path:
-    """Project-relative folder for run outputs (keeps repository root uncluttered)."""
+    """evaluation_runs/ under cwd."""
     p = Path.cwd() / "evaluation_runs"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
 def _next_results_code_search_path(out_dir: Path, lang: str) -> Path:
-    """``results_code_search_<lang>.json``; bump numeric suffix if the series already exists."""
+    """``results_code_search_<lang>.json`` with numeric suffix if needed."""
     prefix = f"results_code_search_{lang}"
     seen: List[int] = []
     for p in out_dir.glob(f"{prefix}*.json"):
@@ -147,12 +137,7 @@ def _llm_stage_rank(
     ground_truth_url: str,
     gt_rank_in_pool: int,
 ) -> int:
-    """0-based rank of GT in the pool (same order as the bi-encoder); used for MRR after Ollama/cloud rerank.
-
-    Historical bug: when GT was not in the pool (gt_rank_in_pool<0) the code used to ``return 1``,
-    which treated many samples where **GT never entered the LLM pool** as rank 2 from the bottom, **inflating edge–cloud MRR** artificially.
-    Correct behavior: if GT is not in the pool, return **-1**; upper-layer metrics treat that as no valid rank.
-    """
+    """GT rank after rerank, -1 if GT not in pool (avoid bogus rank that inflates MRR)."""
     n = len(pool)
     if gt_rank_in_pool < 0 or gt_rank_in_pool >= n:
         return -1
@@ -172,7 +157,7 @@ def _refined_search_query_from_parsed(parsed: dict) -> str:
 
 
 def _valid_best_candidate_index(parsed: dict, pool_len: int) -> Optional[int]:
-    """Return a valid index from JSON if present; otherwise treat Ollama/model output as unusable."""
+    """best_candidate_index if int in range, else None."""
     if "best_candidate_index" not in parsed:
         return None
     v: Any = parsed["best_candidate_index"]
@@ -188,7 +173,7 @@ def _valid_best_candidate_index(parsed: dict, pool_len: int) -> Optional[int]:
 
 
 def _json_truthy(d: dict, *keys: str) -> bool:
-    """If needs_escalation / uncertain (etc.) is true, request cloud re-check."""
+    """True if any key is truthy (escalation-style flags)."""
     for k in keys:
         if k not in d:
             continue
@@ -206,8 +191,6 @@ def _ollama_requests_escalation(parsed: dict) -> bool:
     return _json_truthy(
         parsed, "needs_escalation", "uncertain", "needs_cloud", "request_cloud"
     )
-
-# --- JSON Parsing ---
 
 def _brace_match_end(s: str, start: int) -> int:
     depth = 0
@@ -373,8 +356,6 @@ async def _print_leakage_debug_samples_on_edge_rr0(
         )
 
 
-# --- Evaluation Logic ---
-
 def load_unixcoder_base(
     orchestrator: Orchestrator,
     config: dict,
@@ -382,16 +363,7 @@ def load_unixcoder_base(
     language: str,
     pretrained_base_only: bool = False,
 ) -> str:
-    """Load UniXcoder bi-encoder; returns the actual weight id (for embedding cache keys, so switching models does not reuse stale .npz).
-
-    Python default: code_search.unixcoder_model_path_python / CODE_SEARCH_UNIXCODER_PYTHON_PATH;
-    Go: code_search.unixcoder_model_path_go / CODE_SEARCH_UNIXCODER_GO_PATH;
-    JavaScript: code_search.unixcoder_model_path_javascript / CODE_SEARCH_UNIXCODER_JAVASCRIPT_PATH;
-    PHP: code_search.unixcoder_model_path_php / CODE_SEARCH_UNIXCODER_PHP_PATH;
-    Ruby: code_search.unixcoder_model_path_ruby / CODE_SEARCH_UNIXCODER_RUBY_PATH;
-    If ``pretrained_base_only=True``, always use clone_detection.unixcoder.fallback_pretrained (usually microsoft/unixcoder-base)
-    for ablation without loading a local CSN fine-tune directory.
-    """
+    """Load UniXcoder; return string used for embedding cache keys. ``pretrained_base_only`` → HF base only."""
     if orchestrator.code_encoder is not None and orchestrator.code_tokenizer is not None:
         return str(getattr(orchestrator, "_csn_embed_model_tag", ""))
     import torch

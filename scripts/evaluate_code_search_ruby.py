@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""
-CodeSearchNet (clean) Ruby evaluation entrypoint.
+"""Ruby CSN eval: delegates to ``evaluate_code_search_non_java`` with ``--language ruby``.
 
-- By default, align bi-encoder retrieve_k, Success@K, Ollama/cloud candidate pool,
-  and no_edge cloud-rescue top-K (_RUBY_EVAL_TOP_K). CLI overrides when
-  --top-k / --llm-pool-k / --cloud-rescue-k are passed.
-- Default checkpoint dir is train_unixcoder_csn_ruby.py output (CODE_SEARCH_UNIXCODER_RUBY_PATH);
-  config code_search.unixcoder_model_path_ruby overrides when it is an existing directory.
+Defaults Top-K / pool / rescue to ``_RUBY_EVAL_TOP_K`` when those flags are omitted.
+Checkpoint: ``CODE_SEARCH_UNIXCODER_RUBY_PATH`` or ``settings.yaml`` override.
 """
 from __future__ import annotations
 
@@ -14,7 +10,6 @@ import os
 import sys
 from pathlib import Path
 
-# Align edge retrieve_k, eval K, Ollama/cloud pool, cloud_rescue (same K edge/cloud)
 _RUBY_EVAL_TOP_K = 10
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -29,7 +24,7 @@ def _has_long_opt(argv: list[str], name: str) -> bool:
 
 
 def _inject_ruby_eval_k_defaults() -> None:
-    """If not set on CLI, inject top-k / pool / cloud-rescue K aligned to edge K (10)."""
+    """Prepend K flags from ``_RUBY_EVAL_TOP_K`` when missing."""
     argv = sys.argv[1:]
     k = str(_RUBY_EVAL_TOP_K)
     inserts: list[str] = []

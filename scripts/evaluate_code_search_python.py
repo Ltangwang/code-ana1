@@ -1,20 +1,10 @@
 #!/usr/bin/env python3
-"""
-CodeSearchNet (clean) Python evaluation entrypoint.
-
-Bi-encoder weights: prefer config/settings.yaml code_search.unixcoder_model_path_python;
-if missing or not a directory, use env CODE_SEARCH_UNIXCODER_PYTHON_PATH (this entry
-defaults it to the unixcoder-csn-python output dir, separate from Java
-clone_detection.unixcoder.model_path).
-
-By default, align edge bi-encoder recall, Success@K, Ollama/cloud pool, and no_edge
-cloud-rescue top-K (_PYTHON_EVAL_TOP_K). CLI --top-k / --llm-pool-k / --cloud-rescue-k
-override when provided.
+"""Python CSN eval → ``evaluate_code_search_non_java``. K defaults: ``_PYTHON_EVAL_TOP_K``.
+UniXcoder dir: ``code_search.unixcoder_model_path_python`` or ``CODE_SEARCH_UNIXCODER_PYTHON_PATH``.
 """
 
 from __future__ import annotations
 
-# Default K for edge retrieve_k, eval K, Ollama/cloud pool, cloud_rescue alignment
 _PYTHON_EVAL_TOP_K = 5
 
 import os
@@ -33,7 +23,7 @@ def _has_long_opt(argv: list[str], name: str) -> bool:
 
 
 def _inject_python_eval_k_defaults() -> None:
-    """If not set on CLI, inject top-k / pool / cloud-rescue K aligned to edge K."""
+    """Prepend K flags from ``_PYTHON_EVAL_TOP_K`` when missing."""
     argv = sys.argv[1:]
     k = str(_PYTHON_EVAL_TOP_K)
     inserts: list[str] = []

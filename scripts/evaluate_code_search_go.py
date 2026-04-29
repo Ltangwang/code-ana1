@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
-"""
-CodeSearchNet (clean) Go evaluation entrypoint.
+"""Go CSN eval → ``evaluate_code_search_non_java`` (--language go). K defaults: ``_GO_EVAL_TOP_K``. Weights: env + settings."""
 
-- By default, align bi-encoder retrieve_k, Success@K, Ollama/cloud candidate pool,
-  and no_edge cloud-rescue top-K to the same value (_GO_EVAL_TOP_K). CLI overrides
-  apply when --top-k / --llm-pool-k / --cloud-rescue-k are passed.
-- Default checkpoint dir matches train_unixcoder_csn_go.py --output-dir default
-  (default_unixcoder_csn_go_output_dir), loaded via CODE_SEARCH_UNIXCODER_GO_PATH
-  and config code_search.unixcoder_model_path_go (YAML wins if it is a valid dir).
-"""
 from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
 
-# Align edge retrieve_k, eval K, Ollama/cloud pool, cloud_rescue (same K edge/cloud)
 _GO_EVAL_TOP_K = 5
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -30,7 +21,7 @@ def _has_long_opt(argv: list[str], name: str) -> bool:
 
 
 def _inject_go_eval_k_defaults() -> None:
-    """If not set on CLI, inject top-k / pool / cloud-rescue K aligned to edge K (5)."""
+    """Prepend K flags from ``_GO_EVAL_TOP_K`` when missing."""
     argv = sys.argv[1:]
     k = str(_GO_EVAL_TOP_K)
     inserts: list[str] = []

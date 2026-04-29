@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
-"""
-CodeSearchNet (clean) PHP evaluation entrypoint.
+"""PHP CSN eval → ``evaluate_code_search_non_java``. K defaults: ``_PHP_EVAL_TOP_K``."""
 
-- By default, align bi-encoder retrieve_k, Success@K, Ollama/cloud candidate pool,
-  and no_edge cloud-rescue top-K to the same value (_PHP_EVAL_TOP_K). If you pass
-  --top-k / --llm-pool-k / --cloud-rescue-k on the CLI, those override defaults.
-- Default checkpoint directory matches train_unixcoder_csn_php.py output
-  (CODE_SEARCH_UNIXCODER_PHP_PATH); config code_search.unixcoder_model_path_php
-  in YAML overrides when it points to an existing directory.
-"""
 from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
 
-# Align edge retrieve_k, eval K, Ollama/cloud pool, cloud_rescue (same K edge/cloud)
 _PHP_EVAL_TOP_K = 5
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -30,7 +21,7 @@ def _has_long_opt(argv: list[str], name: str) -> bool:
 
 
 def _inject_php_eval_k_defaults() -> None:
-    """If not set on CLI, inject top-k / pool / cloud-rescue K aligned to edge K (5)."""
+    """Prepend K flags from ``_PHP_EVAL_TOP_K`` when missing."""
     argv = sys.argv[1:]
     k = str(_PHP_EVAL_TOP_K)
     inserts: list[str] = []

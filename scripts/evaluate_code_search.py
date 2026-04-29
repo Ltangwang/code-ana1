@@ -1,21 +1,8 @@
-"""
-Evaluate Code Search using an Edge-Cloud Architecture.
+"""Java CodeSearchNet eval: UniXcoder Top-K, optional CE, Ollama on the pool, then cloud on escalation/rescue.
 
-Fine-tuning (UniXcoder on CodeSearchNet) is **not** invoked here: run ``scripts/train_unixcoder_csn.py``
-(or per-language ``train_unixcoder_csn_*.py``) manually. This script only loads weights from config
-(or Hugging Face base checkpoints) and never starts training.
-
-Edge: UniXcoder bi-encoder over the full CodeSearchNet corpus (``codebase.jsonl`` when present);
-``retrieve_k = --top-k`` (same K as Success@K).
-Local: Cross-Encoder is off by default; the Ollama/cloud pool is ``min(configured llm_pool_k, retrieve_k)``.
-Cloud: If Ollama fails (empty/invalid) or sets ``needs_escalation``/``uncertain``; cloud success is
-``cloud_success_after_fallback``. If the bi-encoder misses GT within ``retrieve_k`` (``no_edge_hit``),
-a cloud-led rescue runs by default: (1) ``refined_search_query`` from the cloud, (2) bi-encoder
-re-ranks with that string, top-``cloud_rescue_k`` pool, (3) cloud returns ``best_candidate_index``.
-``--no-cloud-rescue-refine`` skips (1) and reuses the original query for (2). Malformed cloud JSON
-may skip billing where implemented.
-Metrics: Edge/Ollama/CE/Cloud Success@K all use K = ``--top-k``; combined edge-cloud Success@K and MRR
-use the final pipeline rank (cloud > Ollama > edge as applicable).
+Train separately (train_unixcoder_csn*.py); this only loads checkpoints/HF weights.
+CE off by default; pool size is min(llm_pool_k, retrieve_k). Cloud rerank/rescue per flags (e.g. --no-cloud-rescue-refine).
+Metrics use K = --top-k; final rank prefers cloud > Ollama > edge.
 """
 
 import argparse
@@ -30,7 +17,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from tqdm import tqdm
 
-# Add project root to sys.path
 _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
 
@@ -53,14 +39,14 @@ _CODE_SEARCH_USE_CE = False
 
 
 def _default_results_dir() -> Path:
-    """Project-relative folder for run outputs (keeps repository root uncluttered)."""
+    """evaluation_runs/ under cwd."""
     p = Path.cwd() / "evaluation_runs"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
 def _next_results_code_search_path(out_dir: Path) -> Path:
-    """Monotonic names under out_dir: first ``results_code_search.json``, then ``results_code_search1.json``, etc."""
+    """results_code_search.json, results_code_search1.json, ..."""
     seen: List[int] = []
     for p in out_dir.glob("results_code_search*.json"):
         if p.name == "results_code_search.json":
@@ -74,8 +60,6 @@ def _next_results_code_search_path(out_dir: Path) -> Path:
     return out_dir / f"results_code_search{max(seen) + 1}.json"
 
 
-# --- Cloud Reranking Prompt ---
-
 CSN_RERANK_SYSTEM = """You are an expert Software Engineer and an intelligent Code Search Assistant.
 Your task is to find the most relevant Java code snippet for a given natural language query.
 The dataset is CodeSearchNet, where queries are typically the first sentence of a Javadoc comment.
@@ -88,7 +72,7 @@ Evaluation Criteria:
 """
 
 def _build_rerank_prompt(query: str, candidates: List[Dict[str, Any]]) -> str:
-    """Cloud rerank: full candidate code in the prompt (not truncated); very long inputs may hit provider token limits."""
+    """Full code in prompt (mind provider token limits)."""
     prompt = f"## User Search Query\n\"{query}\"\n\n## Candidate Code Snippets\n"
     for i, cand in enumerate(candidates):
         code = cand.get("code", "") or ""
@@ -118,8 +102,6 @@ def _build_no_edge_refine_prompt(nl_query: str) -> str:
         'A single JSON object only, e.g. {"refined_search_query": "..."}\n'
     )
 
-
-# --- Ollama deep rerank (CodeSearchNet Java) ---
 
 CSN_OLLAMA_SYSTEM = """You are an expert Java engineer evaluating CodeSearchNet-style retrieval.
 The user query is almost always the first sentence of a method's Javadoc in this dataset.
@@ -169,7 +151,7 @@ def _llm_stage_rank(
     ground_truth_url: str,
     gt_rank_in_pool: int,
 ) -> int:
-    """0-based rank of GT in the pool. If GT is not in the pool, return -1; do not fake rank 1 (see same function in non_java)."""
+    """GT rank in pool after rerank; -1 if GT not in pool."""
     n = len(pool)
     if gt_rank_in_pool < 0 or gt_rank_in_pool >= n:
         return -1
@@ -189,7 +171,7 @@ def _refined_search_query_from_parsed(parsed: dict) -> str:
 
 
 def _valid_best_candidate_index(parsed: dict, pool_len: int) -> Optional[int]:
-    """Return a valid index from JSON if present; otherwise treat Ollama/model output as unusable."""
+    """best_candidate_index if int in range, else None."""
     if "best_candidate_index" not in parsed:
         return None
     v: Any = parsed["best_candidate_index"]
@@ -205,7 +187,7 @@ def _valid_best_candidate_index(parsed: dict, pool_len: int) -> Optional[int]:
 
 
 def _json_truthy(d: dict, *keys: str) -> bool:
-    """If needs_escalation / uncertain (etc.) is true, request cloud re-check."""
+    """True if any key is truthy (escalation-style flags)."""
     for k in keys:
         if k not in d:
             continue
@@ -223,8 +205,6 @@ def _ollama_requests_escalation(parsed: dict) -> bool:
     return _json_truthy(
         parsed, "needs_escalation", "uncertain", "needs_cloud", "request_cloud"
     )
-
-# --- JSON Parsing ---
 
 def _brace_match_end(s: str, start: int) -> int:
     depth = 0
@@ -296,10 +276,8 @@ def extract_json_from_text(text: str) -> dict:
             return d
     return {}
 
-# --- Evaluation Logic ---
-
 def load_unixcoder_base(orchestrator: Orchestrator, config: dict) -> None:
-    """Load UniXcoder base model for feature extraction."""
+    """Load UniXcoder tokenizer/model from settings or HF."""
     if orchestrator.code_encoder is not None and orchestrator.code_tokenizer is not None:
         return
     import torch
@@ -338,7 +316,7 @@ def load_unixcoder_base(orchestrator: Orchestrator, config: dict) -> None:
 def _chunk_indexed_evenly(
     indexed: List[Tuple[int, Dict[str, Any]]], num_parts: int
 ) -> List[List[Tuple[int, Dict[str, Any]]]]:
-    """Split a list of (global index, sample) into num_parts chunks; at most as many parts as samples."""
+    """Partition ``(global_idx, row)`` into ~equal chunks (≤ num_parts)."""
     n = len(indexed)
     if n == 0:
         return []
@@ -1285,7 +1263,7 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
         await orchestrator.shutdown()
 
 def _load_config_with_env(config_path: str = "config/settings.yaml") -> dict:
-    """Same as main.load_config: load YAML and expand ${ENV} placeholders in cloud.*.api_key."""
+    """YAML from disk; substitute ${VAR} in cloud.*.api_key."""
     import os
 
     import yaml
@@ -1307,7 +1285,6 @@ def _load_config_with_env(config_path: str = "config/settings.yaml") -> dict:
     return config
 
 
-# When not set on the CLI, align --top-k / --llm-pool-k / --cloud-rescue-k to the same K (one K for edge and cloud)
 _JAVA_EVAL_TOP_K = 1
 
 
@@ -1318,7 +1295,7 @@ def _has_long_opt_java(argv: list[str], name: str) -> bool:
 
 
 def _inject_java_eval_k_defaults() -> None:
-    """When not set on the CLI, align top-k, cloud/edge pool, and cloud-rescue K to 1 for Java eval."""
+    """Prepend --top-k/--llm-pool-k/--cloud-rescue-k from _JAVA_EVAL_TOP_K if absent."""
     argv = sys.argv[1:]
     k = str(_JAVA_EVAL_TOP_K)
     inserts: list[str] = []
