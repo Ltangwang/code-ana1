@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Ablation: bi-encoder (UniXcoder) only, no Ollama / no cloud API.
-# Six languages as in CSN: Java + python/go/javascript/php/ruby (separate processes, separate result files).
+# 消融：纯双塔（UniXcoder），无 Ollama / 无云端 API。
+# 六种语言与 CSN 一致：Java + python/go/javascript/php/ruby（各跑独立进程，结果文件分开）。
 #
-# Usage:
+# 用法：
 #   bash scripts/run_ablation_biencoder_only_6lang.sh
-# Optional env:
-#   EXTRA_ARGS="--sample 100"   # first N queries only, for debugging; omit for full runs
+# 可选环境变量：
+#   EXTRA_ARGS="--sample 100"   # 仅测前 N 条，调试用；全量请不要设
 #
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -24,4 +24,4 @@ for lang in python go javascript php ruby; do
   python scripts/evaluate_code_search_non_java.py --language "$lang" "${COMMON[@]}"
 done
 
-echo "All done. See metrics in each run's results_code_search*.json outputs."
+echo "全部完成。请在各次运行输出的 results_code_search*.json 中查看 metrics。"

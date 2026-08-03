@@ -187,6 +187,9 @@ def code_search_eval_results_dir(
             p = _REPO_ROOT / p
         return p.resolve()
 
+    # 默认写到 AutoDL 数据盘，避免结果堆在仓库 cwd
+    if AUTODL_DATA_ROOT.is_dir():
+        return (AUTODL_DATA_ROOT / "code_search_eval").resolve()
     return default_eval_models_parent(config) / "code_search_eval"
 
 

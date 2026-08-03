@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Ruby CSN eval: delegates to ``evaluate_code_search_non_java`` with ``--language ruby``.
+"""
+CodeSearchNet 清洗版 Ruby 评测入口。
 
-Defaults Top-K / pool / rescue to ``_RUBY_EVAL_TOP_K`` when those flags are omitted.
-Checkpoint: ``CODE_SEARCH_UNIXCODER_RUBY_PATH`` or ``settings.yaml`` override.
+- 默认将双塔 retrieve_k、Success@K、Ollama/云候选池、no_edge 云解救的 top-K 对齐为同一数值
+  （见 _RUBY_EVAL_TOP_K）；命令行显式传入 --top-k / --llm-pool-k / --cloud-rescue-k 时以命令行为准。
+- 默认将权重目录设为 train_unixcoder_csn_ruby.py 的默认输出（CODE_SEARCH_UNIXCODER_RUBY_PATH），
+  与 config code_search.unixcoder_model_path_ruby 一致时可被 YAML 覆盖（以存在目录为准）。
 """
 from __future__ import annotations
 
@@ -10,7 +13,8 @@ import os
 import sys
 from pathlib import Path
 
-_RUBY_EVAL_TOP_K = 10
+# 边侧 retrieve_k、评测 K、Ollama/云池子、cloud_rescue 对齐（云边同一 K）
+_RUBY_EVAL_TOP_K = 1
 
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
@@ -24,7 +28,7 @@ def _has_long_opt(argv: list[str], name: str) -> bool:
 
 
 def _inject_ruby_eval_k_defaults() -> None:
-    """Prepend K flags from ``_RUBY_EVAL_TOP_K`` when missing."""
+    """未在 CLI 指定时，将 top-k / 云边池子 / 云解救召回与边侧 K 对齐为 1。"""
     argv = sys.argv[1:]
     k = str(_RUBY_EVAL_TOP_K)
     inserts: list[str] = []

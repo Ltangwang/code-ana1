@@ -1,4 +1,7 @@
-"""UniXcoder embeddings + cosine Top-K over CodeSearchNet rows."""
+"""
+CodeSearchNet Retriever: Uses UniXcoder's RoBERTa backbone to embed code snippets and natural language queries,
+and performs cosine similarity search to retrieve the Top-K most relevant code snippets for a given query.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +15,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from tqdm import tqdm
 
+# Add project root to sys.path
 _ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(_ROOT))
 

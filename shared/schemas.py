@@ -1,4 +1,4 @@
-"""Pydantic types for LLM I/O and budgeting."""
+"""Shared data schemas for Edge-Cloud code analysis."""
 
 from datetime import datetime
 from enum import Enum
@@ -96,7 +96,7 @@ class AnalysisDraft(BaseModel):
     
     class Config:
         """Pydantic configuration."""
-        protected_namespaces = ()  # allow a field named model_name
+        protected_namespaces = ()  # 允许使用 model_name 字段
     
     def needs_cloud_verification(self, threshold: float = 0.6) -> bool:
         """Determine if this draft needs cloud verification."""

@@ -5,6 +5,7 @@ Java: evaluate_code_search.py. Writes ``results_code_search_<lang>.json``."""
 import argparse
 import asyncio
 import json
+import time
 import os
 import re
 import sys
@@ -28,6 +29,7 @@ from shared.code_search_lang_profiles import (
     CodeSearchLangProfile,
 )
 from shared.csn_paths import (
+    code_search_eval_results_dir,
     default_csn_clean_dataset_root,
     default_eval_models_parent,
     default_unixcoder_csn_go_output_dir,
@@ -75,7 +77,8 @@ def _build_rerank_prompt(
 
     prompt += """## Instructions
 1. Output a <thinking> block where you briefly analyze how well each candidate matches the query based on method name, parameters, return type, and core logic.
-2. Output your final decision as a JSON object matching this schema:
+2. Do NOT assume Candidate 0 is correct; the bi-encoder top-1 may be wrong. Compare ALL candidates independently and be willing to select a non-zero index if it better implements the query.
+3. Output your final decision as a JSON object matching this schema:
 {"best_candidate_index": <int>}
 Where <int> is the index (0, 1, 2, ...) of the best matching candidate. If none match well, choose the one that is closest.
 """
@@ -118,8 +121,9 @@ def _build_ollama_rerank_prompt(
         "2) Then output a single JSON object only (no extra text after it):\n"
         '{"best_candidate_index": <int>, "needs_escalation": <bool>}\n'
         f"best_candidate_index must be 0..{n-1}. "
-        "Set needs_escalation to true if you want a cloud rerank (uncertain or low confidence); "
-        "false if you are confident in your choice."
+        "Do NOT default to index 0; pick the candidate that best implements the query even if it is not first. "
+        "Set needs_escalation to true ONLY if you cannot choose any candidate at all; "
+        "otherwise choose the best index and set needs_escalation to false."
     )
     return "\n".join(lines)
 
@@ -379,7 +383,8 @@ def load_unixcoder_base(
             "Note: --pretrained-base-only is on; bi-encoder uses HuggingFace base "
             f"{model_name} (no local fine-tuned checkpoint)."
         )
-    elif lang == "python":
+    elif lang in ("python", "advtest", "cosqa"):
+        # advtest / cosqa 均为 Python 函数检索，复用 CSN-python 微调双塔权重
         cs = config.get("code_search") or {}
         py_path = (cs.get("unixcoder_model_path_python") or "").strip()
         env_path = os.environ.get("CODE_SEARCH_UNIXCODER_PYTHON_PATH", "").strip()
@@ -577,6 +582,57 @@ def _empty_stages(
     }
 
 
+def _attach_latency(
+    result: Dict[str, Any], lat: Dict[str, float], t0: float
+) -> Dict[str, Any]:
+    """把分阶段 wall-clock（ms）写入单条 query 结果。"""
+    out = dict(result)
+    out["bi_encoder_ms"] = round(float(lat.get("bi_encoder_ms", 0.0)), 3)
+    out["ollama_ms"] = round(float(lat.get("ollama_ms", 0.0)), 3)
+    out["cloud_ms"] = round(float(lat.get("cloud_ms", 0.0)), 3)
+    out["e2e_ms"] = round((time.perf_counter() - t0) * 1000.0, 3)
+    return out
+
+
+def _percentile(sorted_vals: List[float], p: float) -> float:
+    if not sorted_vals:
+        return 0.0
+    if len(sorted_vals) == 1:
+        return float(sorted_vals[0])
+    k = (len(sorted_vals) - 1) * (p / 100.0)
+    f = int(k)
+    c = min(f + 1, len(sorted_vals) - 1)
+    if f == c:
+        return float(sorted_vals[f])
+    return float(sorted_vals[f] * (c - k) + sorted_vals[c] * (k - f))
+
+
+def _latency_summary(values: List[float]) -> Dict[str, float]:
+    vals = sorted(float(v) for v in values if v is not None)
+    if not vals:
+        return {"count": 0, "mean_ms": 0.0, "p50_ms": 0.0, "p95_ms": 0.0}
+    return {
+        "count": len(vals),
+        "mean_ms": round(sum(vals) / len(vals), 3),
+        "p50_ms": round(_percentile(vals, 50), 3),
+        "p95_ms": round(_percentile(vals, 95), 3),
+    }
+
+
+def _aggregate_latency_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """汇总 bi-encoder / Ollama / cloud / e2e 延迟（仅统计实际发生该阶段的样本）。"""
+    bi = [float(r["bi_encoder_ms"]) for r in results if float(r.get("bi_encoder_ms", 0) or 0) > 0]
+    ol = [float(r["ollama_ms"]) for r in results if float(r.get("ollama_ms", 0) or 0) > 0]
+    cl = [float(r["cloud_ms"]) for r in results if float(r.get("cloud_ms", 0) or 0) > 0]
+    e2e = [float(r["e2e_ms"]) for r in results if float(r.get("e2e_ms", 0) or 0) > 0]
+    return {
+        "bi_encoder_latency": _latency_summary(bi),
+        "ollama_latency": _latency_summary(ol),
+        "cloud_latency": _latency_summary(cl),
+        "e2e_latency": _latency_summary(e2e),
+    }
+
+
 async def _no_edge_cloud_rescue(
     idx: int,
     nl_query: str,
@@ -586,17 +642,24 @@ async def _no_edge_cloud_rescue(
     pl: Dict[str, Any],
     query_max_length: int,
     search_lock: Optional[asyncio.Lock],
+    lat: Optional[Dict[str, float]] = None,
+    t0: Optional[float] = None,
 ) -> Dict[str, Any]:
     """
-    If GT is not in the first retrieve_k results, treat the first retrieval as failed; the cloud leads a "redo" of the query (no Ollama/CE).
+    首段 retrieve_k 内无 GT：视为第一次检索失败，由云端主导「重做」该 query（不调 Ollama/CE）。
 
-    Default (cloud_rescue_refine=True):
-      1) Cloud produces refined_search_query from the original query (text for the second retrieval);
-      2) Local bi-encoder uses only that string to recall top cloud_rescue_k candidates from the full index (the pool);
-      3) Cloud outputs best_candidate_index on that pool (final pick, not the bi-encoder order).
+    默认（cloud_rescue_refine=True）：
+      1) 云端根据原 query 生成 refined_search_query（第二次检索用语）；
+      2) 本地双塔仅用该字符串从全库召回 top cloud_rescue_k 候选（构成候选池）；
+      3) 云端在候选池上输出 best_candidate_index（最终选定谁，不是沿用双塔顺序）。
 
-    If refine is off (--no-cloud-rescue-refine): skip step 1, still build the pool with the original query; only step 3 is cloud rerank.
+    若关闭 refine（--no-cloud-rescue-refine）：跳过步骤 1，仍用原 query 召回候选池，仅步骤 3 由云重排。
     """
+    if lat is None:
+        lat = {"bi_encoder_ms": 0.0, "ollama_ms": 0.0, "cloud_ms": 0.0}
+    if t0 is None:
+        t0 = time.perf_counter()
+
     rescue_k = max(int(pl.get("cloud_rescue_k", 50)), int(pl.get("retrieve_k", 10)))
     use_refine = bool(pl.get("cloud_rescue_refine", True))
 
@@ -604,18 +667,22 @@ async def _no_edge_cloud_rescue(
     est_cloud_cost = float(arb.get("estimated_cost_usd", 0.002))
     rounds = 2 if use_refine else 1
     if not await orchestrator.budget_controller.can_afford(est_cloud_cost * rounds):
-        return {
-            "query_idx": idx,
-            "edge_hit": False,
-            "edge_rank": -1,
-            "ce_rank": -1,
-            "ollama_rank": -1,
-            "ollama_verified": False,
-            "ollama_ok": False,
-            "cloud_rank": -1,
-            "cloud_verified": False,
-            "cloud_fallback_reason": "budget_no_edge_rescue",
-        }
+        return _attach_latency(
+            {
+                "query_idx": idx,
+                "edge_hit": False,
+                "edge_rank": -1,
+                "ce_rank": -1,
+                "ollama_rank": -1,
+                "ollama_verified": False,
+                "ollama_ok": False,
+                "cloud_rank": -1,
+                "cloud_verified": False,
+                "cloud_fallback_reason": "budget_no_edge_rescue",
+            },
+            lat,
+            t0,
+        )
 
     cloud_client = orchestrator.cloud_factory.get_client()
     cloud_rank = -1
@@ -626,12 +693,14 @@ async def _no_edge_cloud_rescue(
     search_query_for_pool = nl_query
     if use_refine:
         try:
+            _tc = time.perf_counter()
             r0 = await cloud_client._call_api(
                 _build_no_edge_refine_prompt(nl_query, profile),
                 system_prompt=profile.no_edge_refine_system,
                 max_tokens=512,
                 json_response_format=False,
             )
+            lat["cloud_ms"] += (time.perf_counter() - _tc) * 1000.0
             c0 = r0.get("content", "")
             p0 = extract_json_from_text(c0)
             rq = _refined_search_query_from_parsed(p0)
@@ -646,10 +715,19 @@ async def _no_edge_cloud_rescue(
                 details=f"query={idx}",
             )
         except Exception as e:
-            print(f"  analyze_query {idx} no_edge cloud query-refine call failed, using original query: {e}")
+            print(f"  analyze_query {idx} no_edge 云端改写 query 调用失败，回退原 query: {e}")
             search_query_for_pool = nl_query
 
     def _run_rescue_pool() -> List[Dict[str, Any]]:
+        if pl.get("no_bi_encoder"):
+            cl = pl.get("corpus_list") or []
+            return build_random_corpus_pool(
+                cl,
+                ground_truth_url,
+                rescue_k,
+                idx,
+                seed=int(pl.get("random_pool_seed", 42)) + 79_199,
+            )
         return orchestrator.csn_retriever.search(
             orchestrator,
             search_query_for_pool,
@@ -657,26 +735,30 @@ async def _no_edge_cloud_rescue(
             max_length=query_max_length,
         )
 
+    _tb = time.perf_counter()
     if search_lock is not None:
         async with search_lock:
             rescue_pool = await asyncio.to_thread(_run_rescue_pool)
     else:
         rescue_pool = await asyncio.to_thread(_run_rescue_pool)
+    lat["bi_encoder_ms"] += (time.perf_counter() - _tb) * 1000.0
 
     gt_in_pool = _ground_truth_index(rescue_pool, ground_truth_url)
 
     try:
+        _tc = time.perf_counter()
         response = await cloud_client._call_api(
             _build_rerank_prompt(nl_query, rescue_pool, profile.code_fence),
             system_prompt=profile.rerank_system,
             max_tokens=1024,
             json_response_format=False,
         )
+        lat["cloud_ms"] += (time.perf_counter() - _tc) * 1000.0
         content = response.get("content", "")
         parsed = extract_json_from_text(content)
         best_c = _valid_best_candidate_index(parsed, len(rescue_pool))
         if best_c is None:
-            print(f"  analyze_query {idx}: no_edge rescue cloud returned no valid best_candidate_index")
+            print(f"  analyze_query {idx}: no_edge 解救云返回无有效 best_candidate_index")
             cloud_fallback_reason = "no_edge_rescue_cloud_invalid_parse"
             cloud_verified = False
         else:
@@ -699,18 +781,22 @@ async def _no_edge_cloud_rescue(
         cloud_rank = -1
         cloud_fallback_reason = "no_edge_rescue_cloud_api_error"
 
-    return {
-        "query_idx": idx,
-        "edge_hit": False,
-        "edge_rank": -1,
-        "ce_rank": -1,
-        "ollama_rank": -1,
-        "ollama_verified": False,
-        "ollama_ok": False,
-        "cloud_rank": cloud_rank,
-        "cloud_verified": cloud_verified,
-        "cloud_fallback_reason": cloud_fallback_reason,
-    }
+    return _attach_latency(
+        {
+            "query_idx": idx,
+            "edge_hit": False,
+            "edge_rank": -1,
+            "ce_rank": -1,
+            "ollama_rank": -1,
+            "ollama_verified": False,
+            "ollama_ok": False,
+            "cloud_rank": cloud_rank,
+            "cloud_verified": cloud_verified,
+            "cloud_fallback_reason": cloud_fallback_reason,
+        },
+        lat,
+        t0,
+    )
 
 
 async def analyze_query(
@@ -733,6 +819,16 @@ async def analyze_query(
     ollama_deep_timeout = float(pl["ollama_deep_timeout"])
     profile: CodeSearchLangProfile = pl["lang_profile"]
 
+    t0 = time.perf_counter()
+    lat: Dict[str, float] = {
+        "bi_encoder_ms": 0.0,
+        "ollama_ms": 0.0,
+        "cloud_ms": 0.0,
+    }
+
+    def _fin(d: Dict[str, Any]) -> Dict[str, Any]:
+        return _attach_latency(d, lat, t0)
+
     edge_hit = False
     edge_rank = -1
     try:
@@ -743,6 +839,15 @@ async def analyze_query(
             return orchestrator.csn_retriever.search(
                 orchestrator, nl_query, top_k=retrieve_k, max_length=query_max_length
             )
+
+        def _random_topk() -> List[Dict[str, Any]]:
+            import random as _rnd
+
+            rng = _rnd.Random(idx * 1000003 + retrieve_k)
+            recs = orchestrator.csn_retriever.records
+            k = min(retrieve_k, len(recs))
+            picks = rng.sample(range(len(recs)), k)
+            return [dict(recs[i]) for i in picks]
 
         def _sync_bi_topk() -> List[Dict[str, Any]]:
             return orchestrator.csn_retriever.search(
@@ -761,31 +866,65 @@ async def analyze_query(
             return [dict(x) for x in c_topk]
 
         if skip_cloud:
-            if search_lock is not None:
-                async with search_lock:
-                    candidates_wide = await asyncio.to_thread(_sync_search_only)
+            _tb = time.perf_counter()
+            if pl.get("no_bi_encoder"):
+                if search_lock is not None:
+                    async with search_lock:
+                        candidates_wide = await asyncio.to_thread(_random_topk)
+                else:
+                    candidates_wide = await asyncio.to_thread(_random_topk)
             else:
-                candidates_wide = await asyncio.to_thread(_sync_search_only)
+                if search_lock is not None:
+                    async with search_lock:
+                        candidates_wide = await asyncio.to_thread(_sync_search_only)
+                else:
+                    candidates_wide = await asyncio.to_thread(_sync_search_only)
+            lat["bi_encoder_ms"] += (time.perf_counter() - _tb) * 1000.0
             edge_rank = _ground_truth_index(candidates_wide, ground_truth_url)
             edge_hit = edge_rank >= 0
             if not edge_hit:
-                return _empty_stages(idx, False, -1, "no_edge_hit")
-            return _empty_stages(idx, True, edge_rank, "skip_cloud")
+                return _fin(_empty_stages(idx, False, -1, "no_edge_hit"))
+            return _fin(_empty_stages(idx, True, edge_rank, "skip_cloud"))
 
-        if search_lock is not None:
-            async with search_lock:
-                candidates_wide = await asyncio.to_thread(_sync_bi_topk)
+        _tb = time.perf_counter()
+        if pl.get("no_bi_encoder"):
+            if search_lock is not None:
+                async with search_lock:
+                    candidates_wide = await asyncio.to_thread(_random_topk)
+            else:
+                candidates_wide = await asyncio.to_thread(_random_topk)
         else:
-            candidates_wide = await asyncio.to_thread(_sync_bi_topk)
+            if search_lock is not None:
+                async with search_lock:
+                    candidates_wide = await asyncio.to_thread(_sync_bi_topk)
+            else:
+                candidates_wide = await asyncio.to_thread(_sync_bi_topk)
+        lat["bi_encoder_ms"] += (time.perf_counter() - _tb) * 1000.0
 
         edge_rank = _ground_truth_index(candidates_wide, ground_truth_url)
         edge_hit = edge_rank >= 0
 
+        # 可部署信号：双塔短名单 top1 与 topK 分数差（不依赖 GT）
+        _sims = [
+            float(c.get("similarity", 0.0) or 0.0) for c in candidates_wide[:retrieve_k]
+        ]
+        bi_top1_score = _sims[0] if _sims else 0.0
+        bi_topk_score = _sims[-1] if _sims else 0.0
+        bi_score_margin = bi_top1_score - bi_topk_score
+        score_margin_threshold = float(pl.get("score_margin_threshold", -1.0))
+        low_margin_trigger = (
+            score_margin_threshold >= 0.0
+            and bi_score_margin < score_margin_threshold
+        )
+
         if not edge_hit:
             if pl.get("bi_ce_only") or pl.get("bi_ollama_only"):
                 return _empty_stages(idx, False, -1, "no_edge_hit")
-            if not pl.get("enable_cloud_rescue", True):
-                return _empty_stages(idx, False, -1, "no_edge_hit")
+            # 部署模式：不再用 GT 缺席作为上云触发；oracle_routing 才保留该 oracle 上界
+            if not pl.get("enable_cloud_rescue", True) or not pl.get(
+                "oracle_routing", False
+            ):
+                return _fin(_empty_stages(idx, False, -1, "no_edge_hit"))
             return await _no_edge_cloud_rescue(
                 idx,
                 nl_query,
@@ -795,6 +934,8 @@ async def analyze_query(
                 pl,
                 query_max_length,
                 search_lock,
+                lat=lat,
+                t0=t0,
             )
 
         if search_lock is not None:
@@ -809,89 +950,156 @@ async def analyze_query(
         ce_rank = _ground_truth_index(pool, ground_truth_url)
 
         if pl.get("bi_ce_only"):
-            return {
-                "query_idx": idx,
-                "edge_hit": True,
-                "edge_rank": edge_rank,
-                "ce_rank": ce_rank,
-                "ollama_rank": -1,
-                "ollama_verified": False,
-                "ollama_ok": False,
-                "cloud_rank": -1,
-                "cloud_verified": False,
-                "cloud_fallback_reason": "bi_ce_only",
-            }
-
-        li = orchestrator.local_inference
-        if li is None:
-            raise RuntimeError("local_inference is not initialized")
+            return _fin(
+                {
+                    "query_idx": idx,
+                    "edge_hit": True,
+                    "edge_rank": edge_rank,
+                    "ce_rank": ce_rank,
+                    "ollama_rank": -1,
+                    "ollama_verified": False,
+                    "ollama_ok": False,
+                    "cloud_rank": -1,
+                    "cloud_verified": False,
+                    "cloud_fallback_reason": "bi_ce_only",
+                }
+            )
 
         ollama_rank = -1
         ollama_verified = False
         ollama_ok = False
         pre_cloud_trigger = "none"
 
-        try:
-            ollama_text = await li.generate_text(
-                _build_ollama_rerank_prompt(nl_query, pool, profile),
-                system=profile.ollama_system,
-                max_tokens=ollama_deep_max_tokens,
-                timeout_sec=ollama_deep_timeout,
-            )
-            if not (ollama_text and ollama_text.strip()):
-                print(f"  analyze_query {idx}: Ollama empty response, triggering cloud rerank")
-                pre_cloud_trigger = "ollama_empty_response"
-            else:
-                op = extract_json_from_text(ollama_text)
-                wants_escalation = _ollama_requests_escalation(op)
-                best_o = _valid_best_candidate_index(op, len(pool))
-                if wants_escalation:
-                    pre_cloud_trigger = "ollama_needs_escalation"
-                    if best_o is not None:
+        if pl.get("skip_ollama"):
+            pre_cloud_trigger = "skip_ollama_direct_cloud"
+        else:
+            li = orchestrator.local_inference
+            if li is None:
+                raise RuntimeError("local_inference is not initialized")
+            try:
+                _to = time.perf_counter()
+                ollama_text = await li.generate_text(
+                    _build_ollama_rerank_prompt(nl_query, pool, profile),
+                    system=profile.ollama_system,
+                    max_tokens=ollama_deep_max_tokens,
+                    timeout_sec=ollama_deep_timeout,
+                )
+                lat["ollama_ms"] += (time.perf_counter() - _to) * 1000.0
+                if not (ollama_text and ollama_text.strip()):
+                    print(f"  analyze_query {idx}: Ollama 空响应，触发云端重排")
+                    pre_cloud_trigger = "ollama_empty_response"
+                else:
+                    op = extract_json_from_text(ollama_text)
+                    wants_escalation = _ollama_requests_escalation(op)
+                    best_o = _valid_best_candidate_index(op, len(pool))
+                    if wants_escalation:
+                        pre_cloud_trigger = "ollama_needs_escalation"
+                        if best_o is not None:
+                            ollama_rank = _llm_stage_rank(
+                                pool, best_o, ground_truth_url, ce_rank
+                            )
+                            ollama_verified = True
+                        print(
+                            f"  analyze_query {idx}: Ollama needs_escalation=true，触发云端重排"
+                        )
+                    elif best_o is not None:
                         ollama_rank = _llm_stage_rank(
                             pool, best_o, ground_truth_url, ce_rank
                         )
                         ollama_verified = True
-                    print(
-                        f"  analyze_query {idx}: Ollama needs_escalation=true, triggering cloud rerank"
-                    )
-                elif best_o is not None:
-                    ollama_rank = _llm_stage_rank(
-                        pool, best_o, ground_truth_url, ce_rank
-                    )
-                    ollama_verified = True
-                    ollama_ok = True
-                    pre_cloud_trigger = "none"
-                else:
-                    pre_cloud_trigger = "ollama_invalid_index"
-                    print(
-                        f"  analyze_query {idx}: Ollama has no valid best_candidate_index, triggering cloud rerank"
-                    )
-        except Exception as e:
-            print(f"  analyze_query {idx} Ollama error: {e}, triggering cloud rerank")
-            pre_cloud_trigger = "ollama_exception"
+                        ollama_ok = True
+                        pre_cloud_trigger = "none"
+                    else:
+                        pre_cloud_trigger = "ollama_invalid_index"
+                        print(
+                            f"  analyze_query {idx}: Ollama 无有效 best_candidate_index，触发云端重排"
+                        )
+            except Exception as e:
+                print(f"  analyze_query {idx} Ollama error: {e}，触发云端重排")
+                pre_cloud_trigger = "ollama_exception"
 
         if pl.get("bi_ollama_only"):
             _cfr = "bi_ollama_only" if ollama_ok else f"bi_ollama_only_{pre_cloud_trigger}"
-            return {
-                "query_idx": idx,
-                "edge_hit": True,
-                "edge_rank": edge_rank,
-                "ce_rank": ce_rank,
-                "ollama_rank": ollama_rank,
-                "ollama_verified": ollama_verified,
-                "ollama_ok": ollama_ok,
-                "cloud_rank": -1,
-                "cloud_verified": False,
-                "cloud_fallback_reason": _cfr,
-            }
+            return _fin(
+                {
+                    "query_idx": idx,
+                    "edge_hit": True,
+                    "edge_rank": edge_rank,
+                    "ce_rank": ce_rank,
+                    "ollama_rank": ollama_rank,
+                    "ollama_verified": ollama_verified,
+                    "ollama_ok": ollama_ok,
+                    "cloud_rank": -1,
+                    "cloud_verified": False,
+                    "cloud_fallback_reason": _cfr,
+                    "bi_top1_score": bi_top1_score,
+                    "bi_topk_score": bi_topk_score,
+                    "bi_score_margin": bi_score_margin,
+                }
+            )
 
         cloud_rank = -1
         cloud_verified = False
         cloud_fallback_reason = "none"
 
         force_cloud = bool(pl.get("force_cloud", False))
-        if ollama_ok and not force_cloud:
+        if low_margin_trigger and ollama_ok and not force_cloud:
+            # 部署可观测 Condition B：短名单分数差过小，即使 Ollama 成功也上云复核
+            pre_cloud_trigger = "low_score_margin"
+            cloud_fallback_reason = "low_score_margin"
+            cloud_client = orchestrator.cloud_factory.get_client()
+            cloud_prompt = _build_rerank_prompt(nl_query, pool, profile.code_fence)
+            arb = config.get("clone_detection", {}).get("cloud_arbitration", {})
+            est_cloud_cost = float(arb.get("estimated_cost_usd", 0.002))
+
+            if not await orchestrator.budget_controller.can_afford(est_cloud_cost):
+                print(
+                    f"  DEBUG query {idx}: Budget insufficient，无法发起云端重排"
+                )
+                cloud_fallback_reason = "budget_low_score_margin"
+            else:
+                try:
+                    _tc = time.perf_counter()
+                    response = await cloud_client._call_api(
+                        cloud_prompt,
+                        system_prompt=profile.rerank_system,
+                        max_tokens=1024,
+                        json_response_format=False,
+                    )
+                    lat["cloud_ms"] += (time.perf_counter() - _tc) * 1000.0
+                    content = response.get("content", "")
+                    parsed = extract_json_from_text(content)
+                    best_c = _valid_best_candidate_index(parsed, len(pool))
+                    if best_c is None:
+                        print(
+                            f"  analyze_query {idx}: 云端返回无有效 best_candidate_index，不计费"
+                        )
+                        cloud_fallback_reason = "cloud_invalid_parse_low_margin"
+                        cloud_verified = False
+                    else:
+                        cloud_rank = _llm_stage_rank(
+                            pool, best_c, ground_truth_url, ce_rank
+                        )
+                        cloud_verified = True
+                        cloud_fallback_reason = "cloud_success_low_margin"
+                        from shared.prompts import estimate_cost
+                        _est = estimate_cost(
+                            cloud_prompt,
+                            int(response.get("tokens") or 0),
+                            cloud_client.model,
+                        )
+                        await orchestrator.budget_controller.record_expense(
+                            _est,
+                            orchestrator.cloud_factory.default_provider,
+                            cloud_client.model,
+                            int(response.get("tokens") or 0),
+                            "code_search_rerank_low_margin",
+                            details=f"query={idx}",
+                        )
+                except Exception as e:
+                    print(f"  analyze_query {idx} cloud error: {e}")
+                    cloud_fallback_reason = "cloud_api_error_low_margin"
+        elif ollama_ok and not force_cloud:
             cloud_fallback_reason = "none"
         else:
             if force_cloud and ollama_ok:
@@ -909,18 +1117,20 @@ async def analyze_query(
                 cloud_fallback_reason = "budget_after_ollama_fail"
             else:
                 try:
+                    _tc = time.perf_counter()
                     response = await cloud_client._call_api(
                         cloud_prompt,
                         system_prompt=profile.rerank_system,
                         max_tokens=1024,
                         json_response_format=False,
                     )
+                    lat["cloud_ms"] += (time.perf_counter() - _tc) * 1000.0
                     content = response.get("content", "")
                     parsed = extract_json_from_text(content)
                     best_c = _valid_best_candidate_index(parsed, len(pool))
                     if best_c is None:
                         print(
-                            f"  analyze_query {idx}: cloud returned no valid best_candidate_index, no charge"
+                            f"  analyze_query {idx}: 云端返回无有效 best_candidate_index，不计费"
                         )
                         cloud_fallback_reason = "cloud_invalid_parse"
                         cloud_verified = False
@@ -930,8 +1140,14 @@ async def analyze_query(
                         )
                         cloud_verified = True
                         cloud_fallback_reason = "cloud_success_after_fallback"
+                        from shared.prompts import estimate_cost
+                        _est = estimate_cost(
+                            cloud_prompt,
+                            int(response.get("tokens") or 0),
+                            cloud_client.model,
+                        )
                         await orchestrator.budget_controller.record_expense(
-                            est_cloud_cost,
+                            _est,
                             orchestrator.cloud_factory.default_provider,
                             cloud_client.model,
                             int(response.get("tokens") or 0),
@@ -942,33 +1158,40 @@ async def analyze_query(
                     print(f"  analyze_query {idx} cloud error: {e}")
                     cloud_fallback_reason = "cloud_api_error"
 
-        return {
-            "query_idx": idx,
-            "edge_hit": True,
-            "edge_rank": edge_rank,
-            "ce_rank": ce_rank,
-            "ollama_rank": ollama_rank,
-            "ollama_verified": ollama_verified,
-            "ollama_ok": ollama_ok,
-            "cloud_rank": cloud_rank,
-            "cloud_verified": cloud_verified,
-            "cloud_fallback_reason": cloud_fallback_reason,
-        }
+        return _fin(
+            {
+                "query_idx": idx,
+                "edge_hit": True,
+                "edge_rank": edge_rank,
+                "ce_rank": ce_rank,
+                "ollama_rank": ollama_rank,
+                "ollama_verified": ollama_verified,
+                "ollama_ok": ollama_ok,
+                "cloud_rank": cloud_rank,
+                "cloud_verified": cloud_verified,
+                "cloud_fallback_reason": cloud_fallback_reason,
+                "bi_top1_score": bi_top1_score,
+                "bi_topk_score": bi_topk_score,
+                "bi_score_margin": bi_score_margin,
+            }
+        )
 
     except Exception as e:
         print(f"  analyze_query {idx} error: {e}")
-        return {
-            "query_idx": idx,
-            "edge_hit": edge_hit,
-            "edge_rank": edge_rank,
-            "ce_rank": -1,
-            "ollama_rank": -1,
-            "ollama_verified": False,
-            "ollama_ok": False,
-            "cloud_rank": -1,
-            "cloud_verified": False,
-            "cloud_fallback_reason": "pipeline_exception",
-        }
+        return _fin(
+            {
+                "query_idx": idx,
+                "edge_hit": edge_hit,
+                "edge_rank": edge_rank,
+                "ce_rank": -1,
+                "ollama_rank": -1,
+                "ollama_verified": False,
+                "ollama_ok": False,
+                "cloud_rank": -1,
+                "cloud_verified": False,
+                "cloud_fallback_reason": "pipeline_exception",
+            }
+        )
 
 
 def _pipeline_final_rank_for_metrics(
@@ -984,13 +1207,18 @@ def _pipeline_final_rank_for_metrics(
             return -1
         cr = int(r.get("ce_rank", -1))
         return cr if cr >= 0 else -1
-    if r.get("cloud_verified"):
-        return int(r.get("cloud_rank", -1))
+    edge_rank = int(r.get("edge_rank", -1)) if r.get("edge_hit") else -1
+
+    if r.get("cloud_verified") and int(r.get("cloud_rank", -1)) >= 0:
+        return int(r["cloud_rank"])
+
     if r.get("ollama_verified") and int(r.get("ollama_rank", -1)) >= 0:
         return int(r["ollama_rank"])
+
     if r.get("ollama_ok") and int(r.get("ollama_rank", -1)) >= 0:
         return int(r["ollama_rank"])
-    return -1
+
+    return edge_rank if edge_rank >= 0 else -1
 
 
 async def run_evaluation(args: argparse.Namespace, config: dict):
@@ -1045,7 +1273,7 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
 
         cs_eval = config.get("code_search") or {}
         strip_py_idx = bool(cs_eval.get("strip_python_code_docstrings", False)) and (
-            str(lang).strip().lower() == "python"
+            str(lang).strip().lower() in ("python", "advtest", "cosqa")
         )
 
         orchestrator.csn_retriever = CSNRetriever.build_or_load(
@@ -1103,11 +1331,17 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
         cloud_rescue_refine = bool(cs.get("cloud_rescue_refine", True))
         if getattr(args, "no_cloud_rescue_refine", False):
             cloud_rescue_refine = False
+        score_margin_threshold = float(cs.get("score_margin_threshold", -1.0))
+        if getattr(args, "score_margin_threshold", None) is not None:
+            score_margin_threshold = float(args.score_margin_threshold)
+        oracle_routing = bool(getattr(args, "oracle_routing", False))
 
         ce_model = None
         skip_cloud = bool(getattr(args, "skip_cloud", False))
         bi_ce_only = bool(getattr(args, "bi_ce_only", False))
         bi_ollama_only = bool(getattr(args, "bi_ollama_only", False))
+        skip_ollama = bool(getattr(args, "skip_ollama", False))
+        no_bi_encoder = bool(getattr(args, "no_bi_encoder", False))
         if bi_ce_only and skip_cloud:
             print("Error: --bi-ce-only and --skip-cloud cannot be used together.")
             return
@@ -1184,6 +1418,10 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
             "lang_profile": profile,
             "bi_ce_only": bi_ce_only,
             "bi_ollama_only": bi_ollama_only,
+            "skip_ollama": skip_ollama,
+            "no_bi_encoder": no_bi_encoder,
+            "score_margin_threshold": score_margin_threshold,
+            "oracle_routing": oracle_routing,
         }
         if skip_cloud:
             print(
@@ -1379,6 +1617,9 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
                 "cloud_success_no_edge_rescue",
                 "no_edge_rescue_cloud_invalid_parse",
                 "no_edge_rescue_cloud_api_error",
+                "cloud_success_low_margin",
+                "cloud_invalid_parse_low_margin",
+                "cloud_api_error_low_margin",
             }
         )
         cloud_invocation_count = sum(
@@ -1469,6 +1710,8 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
             "llm_pool_k": llm_pool_k,
             "bi_ce_only": bi_ce_only,
             "bi_ollama_only": bi_ollama_only,
+            "skip_ollama": skip_ollama,
+            "no_bi_encoder": no_bi_encoder,
             "edge_success_at_k": edge_success_at_k,
             "edge_mrr": edge_mrr,
             "edge_cloud_combined_mrr": edge_cloud_combined_mrr,
@@ -1479,6 +1722,34 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
             "cloud_invocation_rate": cloud_invocation_rate,
             "cloud_fallback_breakdown": dict(cfr_counter),
         }
+        # 本次评测累计云花费（按 token 估算）
+        try:
+            _bs = await orchestrator.get_budget_status()
+            metrics_out["cloud_estimated_cost_usd_total"] = round(_bs.used_budget, 6)
+            metrics_out["cloud_estimated_cost_usd_per_query"] = (
+                round(_bs.used_budget / n, 6) if n else 0.0
+            )
+        except Exception:
+            pass
+
+        # 分阶段延迟：mean / P50 / P95（ms）
+        latency_metrics = _aggregate_latency_metrics(results)
+        metrics_out.update(latency_metrics)
+        print("\n--- Latency (ms) ---")
+        for stage_key, label in [
+            ("bi_encoder_latency", "Bi-encoder"),
+            ("ollama_latency", "Ollama/SLM"),
+            ("cloud_latency", "Cloud"),
+            ("e2e_latency", "End-to-end"),
+        ]:
+            s = latency_metrics.get(stage_key, {})
+            print(
+                f"{label}: n={s.get('count', 0)}, "
+                f"mean={s.get('mean_ms', 0):.1f}, "
+                f"P50={s.get('p50_ms', 0):.1f}, "
+                f"P95={s.get('p95_ms', 0):.1f}"
+            )
+
         if eval_k == 1:
             metrics_out["success_at_1"] = edge_success_at_k
             if not skip_cloud and not bi_ce_only:
@@ -1494,11 +1765,15 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
                     "cloud_mrr": cloud_mrr,
                 }
             )
-        results_path = _next_results_code_search_path(_default_results_dir(), lang)
+        out_dir = code_search_eval_results_dir(
+            config, getattr(args, "results_dir", None)
+        )
+        out_dir.mkdir(parents=True, exist_ok=True)
+        results_path = _next_results_code_search_path(out_dir, lang)
         metrics_out["results_path"] = str(results_path.resolve())
         with open(results_path, "w", encoding="utf-8") as f:
             json.dump({"metrics": metrics_out, "details": results}, f, indent=2)
-        print(f"\nWrote results to: {results_path.resolve()}")
+        print(f"\n结果已写入: {results_path.resolve()}")
             
     finally:
         await orchestrator.shutdown()
@@ -1652,6 +1927,36 @@ def main():
             "Load only HuggingFace base for bi-encoder (clone_detection.unixcoder.fallback_pretrained, "
             "default microsoft/unixcoder-base), no local CSN fine-tune; compare to fine-tuned weights."
         ),
+    )
+    parser.add_argument(
+        "--skip-ollama",
+        action="store_true",
+        help="Ablation: skip the Ollama stage; go to cloud routing directly after CE shortlist",
+    )
+    parser.add_argument(
+        "--no-bi-encoder",
+        action="store_true",
+        help="Ablation: replace the bi-encoder shortlist with a random pool (no edge retrieval)",
+    )
+    parser.add_argument(
+        "--results-dir",
+        type=str,
+        default=None,
+        help=(
+            "评测 JSON 输出目录（默认：/root/autodl-fs/code_search_eval，"
+            "或 config code_search_eval.results_output）"
+        ),
+    )
+    parser.add_argument(
+        "--score-margin-threshold",
+        type=float,
+        default=None,
+        help="部署可观测 Condition B：短名单 top1 与 topK 分数差低于该阈值则上云复核（默认取 config code_search.score_margin_threshold）",
+    )
+    parser.add_argument(
+        "--oracle-routing",
+        action="store_true",
+        help="Oracle upper bound（仅评测对照用）：允许用 GT 缺席作为上云触发；主实验不要开",
     )
     args = parser.parse_args()
 
