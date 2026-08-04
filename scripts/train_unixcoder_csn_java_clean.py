@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-Java（GraphCodeBERT 清洗版）CodeSearchNet 微调入口（UniXcoder 双塔，超参与 train_unixcoder_csn.py 一致）。
+Java (GraphCodeBERT cleaned) CodeSearchNet finetune entry (UniXcoder bi-encoder; same hyperparams as train_unixcoder_csn.py).
 
-与直接运行 train_unixcoder_csn.py 的区别：本入口**强制**使用清洗版数据根下的
-``CodeSearchNet_clean_Dataset/java/train.jsonl``，不会优先落到原始 ``CodeSearchNet_Dataset/java``，
-避免在同时存在两套数据时误用未清洗语料。
+Unlike plain train_unixcoder_csn.py, this entry **always** uses cleaned data under
+``CodeSearchNet_clean_Dataset/java/train.jsonl`` and does not prefer raw ``CodeSearchNet_Dataset/java``,
+so you do not pick uncleaned data when both trees exist.
 
-- 默认 --output-dir 为 shared.csn_paths.default_unixcoder_csn_output_dir()（unixcoder-csn-java；
-  与 evaluate_code_search.py 使用的 clone_detection.unixcoder.model_path 应对齐为同一物理目录）。
-- 默认 train：``<CSN_CLEAN_OUTPUT_DIR 或 default_csn_clean_dataset_root>/java/train.jsonl``。
-- 默认验证：从 train 中随机划出 3%（--valid-split-ratio 0.03，seed 固定），与其它清洗版语言一致；
-  勿用 test 做训练/验证以免评测泄漏。
-- 不启用 Python 专用的 code 去 docstring。
+- Default --output-dir: shared.csn_paths.default_unixcoder_csn_output_dir() (unixcoder-csn-java;
+  should match clone_detection.unixcoder.model_path used by evaluate_code_search.py).
+- Default train: ``<CSN_CLEAN_OUTPUT_DIR or default_csn_clean_dataset_root>/java/train.jsonl``.
+- Default validation: random 3% from train (--valid-split-ratio 0.03, fixed seed), same as other cleaned languages;
+  do not use test for train/val to avoid eval leakage.
+- Does not enable Python-only code docstring stripping.
 
-用法：
+Usage:
 
   python scripts/train_unixcoder_csn_java_clean.py
 
@@ -84,9 +84,9 @@ if __name__ == "__main__":
     clean_train = default_csn_clean_dataset_root() / "java" / "train.jsonl"
     if not _argv_has_train_jsonl(sys.argv) and not clean_train.is_file():
         print(
-            "错误: 未指定 --train-jsonl，且未找到清洗版训练文件:\n"
+            "Error: --train-jsonl not set and cleaned train file not found:\n"
             f"  {clean_train}\n"
-            "请准备 CodeSearchNet_clean_Dataset/java/train.jsonl，或显式传入 --train-jsonl。"
+            "Prepare CodeSearchNet_clean_Dataset/java/train.jsonl or pass --train-jsonl explicitly."
         )
         sys.exit(1)
     from scripts.train_unixcoder_csn import main

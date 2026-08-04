@@ -1118,6 +1118,8 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
         skip_cloud = bool(getattr(args, "skip_cloud", False))
         bi_ce_only = bool(getattr(args, "bi_ce_only", False))
         bi_ollama_only = bool(getattr(args, "bi_ollama_only", False))
+        skip_ollama = bool(getattr(args, "skip_ollama", False))
+        no_bi_encoder = bool(getattr(args, "no_bi_encoder", False))
         if bi_ce_only and skip_cloud:
             print("Error: --bi-ce-only and --skip-cloud cannot be used together.")
             return

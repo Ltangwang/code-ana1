@@ -1,8 +1,8 @@
 """
-从 Python 源码字符串中去掉「块级」文档串，降低 NL(docstring) 与 code 侧字面重合。
+Strip "block" docstrings from Python source strings to reduce literal overlap between NL (docstring) and code.
 
-仅用于训练/检索索引侧对 `code` 字段的预处理；query 仍使用 nl_query。
-对无法解析的片段原样返回。
+Only for preprocessing the `code` field at train/index time; queries still use nl_query.
+Unparseable fragments are returned unchanged.
 """
 
 from __future__ import annotations
@@ -46,8 +46,8 @@ class _DocstringStripper(ast.NodeTransformer):
 
 def strip_python_code_docstrings(code: str) -> str:
     """
-    解析为 AST 后移除 module / class / function / async def 体首条 docstring，再 ast.unparse。
-    解析失败或 unparse 过短则返回原文。
+    Parse to AST, remove the first docstring in module / class / function / async def bodies, then ast.unparse.
+    On parse failure or if unparse is too short, return the original string.
     """
     raw = (code or "").strip()
     if len(raw) < 8:

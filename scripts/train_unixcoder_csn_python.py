@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Python 清洗版 CodeSearchNet 微调入口。
+Entry point for Python cleaned CodeSearchNet finetuning (UniXcoder bi-encoder).
 
-- 默认 --output-dir 为 unixcoder-csn-python，与 Java 的 unixcoder-csn-java 分离，避免覆盖。
-- 默认 train：CodeSearchNet_clean_Dataset/python/train.jsonl（全量；--train-max-samples 默认 0=不限制）。
-- 默认验证：从 train 中随机划出 3%（--valid-split-ratio 0.03，seed 固定），
-  因清洗版 valid/test 无代码正文；勿从 test 划分以免评测泄漏。
-- 默认开启 ``--strip-python-code-docstrings``：训练用 code 经 AST 去掉 docstring，减弱与 query 的字面重合；
-  请在 config/settings.yaml 中保持 ``code_search.strip_python_code_docstrings: true`` 以便评测索引一致。
+- Default --output-dir is unixcoder-csn-python, separate from Java unixcoder-csn-java to avoid overwriting.
+- Default train: CodeSearchNet_clean_Dataset/python/train.jsonl (full; --train-max-samples default 0 = no cap).
+- Default validation: random 3% from train (--valid-split-ratio 0.03, fixed seed) because cleaned valid/test
+  often have no code body; do not split from test to avoid eval leakage.
+- Default enables ``--strip-python-code-docstrings``: training code is AST-stripped to reduce literal overlap with query;
+  keep ``code_search.strip_python_code_docstrings: true`` in config/settings.yaml so eval indexing matches.
 
-仍可用 --valid-jsonl 指定外部验证集；若同时设 --valid-split-ratio>0，以划分为准。
+You can still pass --valid-jsonl; if --valid-split-ratio>0, split takes precedence.
 
-用法：
+Usage:
 
   python scripts/train_unixcoder_csn_python.py
 
-  # 显式关闭去 docstring（不推荐）
+  # Explicitly disable docstring stripping (not recommended)
   python scripts/train_unixcoder_csn_python.py --no-strip-python-code-docstrings
 """
 

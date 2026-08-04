@@ -1,5 +1,3 @@
-"""shared.csn_python_code_strip 单测。"""
-
 from shared.csn_python_code_strip import strip_python_code_docstrings
 
 
