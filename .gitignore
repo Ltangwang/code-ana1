@@ -98,3 +98,12 @@ temp_*.java
 # ML / experiment tooling (optional)
 wandb/
 runs/
+
+# Dataset download helpers (local only)
+scripts/download_advtest_cosqa.py
+scripts/prepare_external_benchmarks.py
+
+# Papers / local PDFs
+paper31.pdf
+*.pdf
+!figures/**/*.pdf

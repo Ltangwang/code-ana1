@@ -359,7 +359,7 @@ def _empty_stages(
 def _attach_latency(
     result: Dict[str, Any], lat: Dict[str, float], t0: float
 ) -> Dict[str, Any]:
-    """把分阶段 wall-clock（ms）写入单条 query 结果。"""
+    """Attach per-stage latency (ms) to one query result."""
     out = dict(result)
     out["bi_encoder_ms"] = round(float(lat.get("bi_encoder_ms", 0.0)), 3)
     out["ollama_ms"] = round(float(lat.get("ollama_ms", 0.0)), 3)
@@ -394,7 +394,7 @@ def _latency_summary(values: List[float]) -> Dict[str, float]:
 
 
 def _aggregate_latency_metrics(results: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """汇总 bi-encoder / Ollama / cloud / e2e 延迟（仅统计实际发生该阶段的样本）。"""
+    """Aggregate bi-encoder / Ollama / cloud / e2e latency summaries."""
     bi = [float(r["bi_encoder_ms"]) for r in results if float(r.get("bi_encoder_ms", 0) or 0) > 0]
     ol = [float(r["ollama_ms"]) for r in results if float(r.get("ollama_ms", 0) or 0) > 0]
     cl = [float(r["cloud_ms"]) for r in results if float(r.get("cloud_ms", 0) or 0) > 0]
@@ -419,16 +419,7 @@ async def _no_edge_cloud_rescue(
     lat: Optional[Dict[str, float]] = None,
     t0: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """
-    首段 retrieve_k 内无 GT：视为第一次检索失败，由云端主导「重做」该 query（不调 Ollama/CE）。
-
-    默认（cloud_rescue_refine=True）：
-      1) 云端根据原 query 生成 refined_search_query（第二次检索用语）；
-      2) 本地双塔仅用该字符串从全库召回 top cloud_rescue_k 候选（构成候选池）；
-      3) 云端在候选池上输出 best_candidate_index（最终选定谁，不是沿用双塔顺序）。
-
-    若关闭 refine（--no-cloud-rescue-refine）：跳过步骤 1，仍用原 query 召回候选池，仅步骤 3 由云重排。
-    """
+    """Cloud rescue when GT is absent from the first retrieve_k shortlist (oracle path)."""
     if lat is None:
         lat = {"bi_encoder_ms": 0.0, "ollama_ms": 0.0, "cloud_ms": 0.0}
     if t0 is None:
@@ -676,7 +667,7 @@ async def analyze_query(
         edge_rank = _ground_truth_index(candidates_wide, ground_truth_url)
         edge_hit = edge_rank >= 0
 
-        # 可部署信号：双塔短名单 top1 与 topK 分数差（不依赖 GT）
+        # shortlist score margin (top1 vs topK); no GT
         _sims = [
             float(c.get("similarity", 0.0) or 0.0) for c in candidates_wide[:retrieve_k]
         ]
@@ -692,7 +683,7 @@ async def analyze_query(
         if not edge_hit:
             if pl.get("bi_ce_only") or pl.get("bi_ollama_only"):
                 return _empty_stages(idx, False, -1, "no_edge_hit")
-            # 部署模式：不再用 GT 缺席作为上云触发；oracle_routing 才保留该 oracle 上界
+            # no_edge cloud rescue only when --oracle-routing
             if not pl.get("enable_cloud_rescue", True) or not pl.get(
                 "oracle_routing", False
             ):
@@ -816,7 +807,7 @@ async def analyze_query(
 
         force_cloud = bool(pl.get("force_cloud", False))
         if low_margin_trigger and ollama_ok and not force_cloud:
-            # 部署可观测 Condition B：短名单分数差过小，即使 Ollama 成功也上云复核
+            # low score margin -> cloud even if Ollama ok
             pre_cloud_trigger = "low_score_margin"
             cloud_fallback_reason = "low_score_margin"
             cloud_client = orchestrator.cloud_factory.get_client()
@@ -1217,28 +1208,30 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
                 f"no CE, no cloud calls; no_edge_hit counts as failure"
             )
         else:
-            cloud_note = (
-                "; also force cloud on every query after Ollama success (--force-cloud)"
-                if force_cloud
-                else "; cloud on failure or needs_escalation"
-            )
-            if getattr(args, "no_cloud_rescue", False):
-                rescue_txt = "no_cloud_rescue: no cloud rescue for no_edge_hit"
+            if skip_ollama:
+                cloud_note = "; --skip-ollama (direct cloud)"
+            elif force_cloud:
+                cloud_note = "; --force-cloud"
+            else:
+                cloud_note = "; cloud on failure or needs_escalation"
+            if getattr(args, "no_cloud_rescue", False) or not oracle_routing:
+                rescue_txt = "no_edge_hit: no cloud rescue"
             elif cloud_rescue_refine:
                 rescue_txt = (
-                    f"no_edge_hit -> cloud refines search query, bi-encoder recalls top-{cloud_rescue_k}, "
-                    "cloud picks in pool"
+                    f"no_edge_hit -> cloud refine + bi-encoder top-{cloud_rescue_k} "
+                    "(--oracle-routing)"
                 )
             else:
                 rescue_txt = (
-                    f"no_edge_hit -> original query, bi-encoder top-{cloud_rescue_k}, "
-                    "cloud picks in pool (--no-cloud-rescue-refine)"
+                    f"no_edge_hit -> bi-encoder top-{cloud_rescue_k}, cloud pick "
+                    "(--oracle-routing --no-cloud-rescue-refine)"
                 )
             ce_txt = "CE -> " if use_ce else "no CE -> "
             print(
                 f"Pipeline: retrieve_k={retrieve_k} (= --top-k), "
                 f"Success@{args.top_k}, "
-                f"{ce_txt}Ollama{cloud_note} (pool={llm_pool_k}=min(config, retrieve_k)); "
+                f"{ce_txt}{'direct cloud' if skip_ollama else 'Ollama'}{cloud_note} "
+                f"(pool={llm_pool_k}=min(config, retrieve_k)); "
                 f"{rescue_txt}"
             )
 
@@ -1481,7 +1474,7 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
             "cloud_invocation_rate": cloud_invocation_rate,
             "cloud_fallback_breakdown": dict(cfr_counter),
         }
-        # 本次评测累计云花费（按 token 估算）
+        # cloud cost estimate from budget_controller
         try:
             _bs = await orchestrator.get_budget_status()
             metrics_out["cloud_estimated_cost_usd_total"] = round(_bs.used_budget, 6)
@@ -1491,7 +1484,7 @@ async def run_evaluation(args: argparse.Namespace, config: dict):
         except Exception:
             pass
 
-        # 分阶段延迟：mean / P50 / P95（ms）
+        # latency aggregates
         latency_metrics = _aggregate_latency_metrics(results)
         metrics_out.update(latency_metrics)
         print("\n--- Latency (ms) ---")
@@ -1708,12 +1701,12 @@ def main():
         "--score-margin-threshold",
         type=float,
         default=None,
-        help="部署可观测 Condition B：短名单 top1 与 topK 分数差低于该阈值则上云复核（默认取 config code_search.score_margin_threshold）",
+        help="Cloud if shortlist top1-topK score margin is below this (default: config)",
     )
     parser.add_argument(
         "--oracle-routing",
         action="store_true",
-        help="Oracle upper bound（仅评测对照用）：允许用 GT 缺席作为上云触发；主实验不要开",
+        help="Allow GT-miss cloud rescue (oracle upper bound; off for main runs)",
     )
     args = parser.parse_args()
 

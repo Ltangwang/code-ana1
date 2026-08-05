@@ -253,8 +253,7 @@ COST_ESTIMATES = {
         "input_per_1k": 0.00025,
         "output_per_1k": 0.00125
     },
-    # 阿里云 DashScope（qwen3-coder-30b-a3b-instruct）按当前评测用量的近似报价；
-    # 与官方计费页可能略有出入，仅用于 cost–accuracy 估算，以实际账单为准。
+    # DashScope approximate rates for cost estimates
     "qwen3-coder-30b-a3b-instruct": {
         "input_per_1k": 0.001,
         "output_per_1k": 0.003
